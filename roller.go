@@ -26,8 +26,10 @@ import (
 var (
 	apiKey            = os.Getenv("DATADOG_API_KEY")
 	appKey            = os.Getenv("DATADOG_APP_KEY")
-	kubernetesCluster = os.Getenv("KUBERNETES_CLUSTER")
+	cluster           = os.Getenv("CLUSTER")
 	awsProfile        = os.Getenv("AWS_PROFILE")
+	awsRegion         = os.Getenv("AWS_REGION")
+	kubernetesCluster string
 	verboseLogging    = os.Getenv("ROLLER_VERBOSE_MODE")
 	rollerComponents  = os.Getenv("ROLLER_COMPONENTS")
 	defaultComponents = []string{
@@ -332,8 +334,12 @@ func main() {
 	// Force the use of ~/.aws/config
 	_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
 
-	if kubernetesCluster == "" {
-		log.Fatal("Please specify an env var KUBERNETES_CLUSTER that contains the name of the target kubernetes cluster")
+	if cluster == "" {
+		log.Fatal("Please specify an env var CLUSTER that contains the name of the target kubernetes cluster")
+	}
+
+	if awsRegion == "" {
+		log.Fatal("Please specify an env var AWS_REGION that contains the name of the desired AWS region")
 	}
 
 	if awsProfile == "" {
@@ -348,6 +354,7 @@ func main() {
 		log.Fatal("Please specify an env var DATADOG_APP_KEY that contains the datadog app key to use")
 	}
 
+	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsProfile, awsRegion, cluster)
 	verboseLog(fmt.Sprintf("Kubernetes cluster is set to %s\n", kubernetesCluster))
 	verboseLog(fmt.Sprintf("AWS_PROFILE is set to %s\n", awsProfile))
 
