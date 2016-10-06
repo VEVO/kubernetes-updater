@@ -7,11 +7,12 @@ Iterate through all of the etcd, masters and worker nodes in a given cluster ter
 
 The tool expects that the environment is configured to support AWS named profiles as detailed [here](http://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html#cli-multiple-profiles).
 
-The target kubernetes cluster is set by using both of these environmental variables
+The target kubernetes cluster is set by concatenating the following enviromental variables.
 
 ```
-KUBERNETES_CLUSTER=dev-us-east-1-infra
+CLUSTER=infra
 AWS_PROFILE=dev
+AWS_REGION=us-east-1
 ```
 
 Verbose logging can be enabled via
