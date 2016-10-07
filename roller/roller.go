@@ -283,8 +283,10 @@ func verifyReplacement(c string, t time.Time) error {
 		return errors.New(errString)
 	}
 
+	var status string
+	var err error
 	for loop := 0; loop < 30; loop++ {
-		status, err := getHostStatus(newInstance)
+		status, err = getHostStatus(newInstance)
 		fmt.Printf("Instance %s current status in datadog is %s - %s \n", newInstance, status, timeStamp())
 		if err != nil {
 			return err
@@ -296,7 +298,7 @@ func verifyReplacement(c string, t time.Time) error {
 		time.Sleep(time.Second * 60)
 	}
 
-	errString = fmt.Sprintf("Gave up waiting for instance %s to become healthy\n", newInstance)
+	errString = fmt.Sprintf("The replacement instance %s has a status of %s so we are stopping the rolling update for component %s\n", newInstance, status, c)
 	return errors.New(errString)
 }
 
@@ -324,7 +326,12 @@ func terminateComponentInstances(component string, nodes []*ec2.Instance, wg *sy
 			time.Sleep(time.Second * 30)
 		}
 
-		verifyReplacement(component, curTime)
+		err = verifyReplacement(component, curTime)
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+
 	}
 	fmt.Printf("Completed termination of %s components\n", component)
 	return err
