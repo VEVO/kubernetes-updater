@@ -192,8 +192,9 @@ func sortInstancesByComponent(res *ec2.DescribeInstancesOutput) *ec2Details {
 	return e
 }
 
-func suspendASGProceses(asg string) (*autoscaling.SuspendProcessesOutput, error) {
-	var resp *autoscaling.SuspendProcessesOutput
+func manageASGProceses(asg string, action string) (string, error) {
+	var err error
+	var resp string
 
 	sess, err := session.NewSession()
 	if err != nil {
@@ -210,27 +211,17 @@ func suspendASGProceses(asg string) (*autoscaling.SuspendProcessesOutput, error)
 			aws.String("AZRebalance"),
 		},
 	}
-	resp, err = svc.SuspendProcesses(params)
-	return resp, err
-}
 
-func resumeASGProceses(asg string) (*autoscaling.ResumeProcessesOutput, error) {
-	var resp *autoscaling.ResumeProcessesOutput
-
-	sess, err := session.NewSession()
-	if err != nil {
-		return resp, err
+	if action == "suspend" {
+		var r *autoscaling.SuspendProcessesOutput
+		r, err = svc.SuspendProcesses(params)
+		resp = r.String()
+	} else {
+		var r *autoscaling.ResumeProcessesOutput
+		r, err = svc.ResumeProcesses(params)
+		resp = r.String()
 	}
 
-	svc := autoscaling.New(sess)
-
-	params := &autoscaling.ScalingProcessQuery{
-		AutoScalingGroupName: aws.String(asg),
-		ScalingProcesses: []*string{
-			aws.String("AZRebalance"),
-		},
-	}
-	resp, err = svc.ResumeProcesses(params)
 	return resp, err
 }
 
@@ -383,7 +374,7 @@ func main() {
 
 	fmt.Printf("Suspending rebalance process on ASGs: %v\n", startingComponents.Asgs)
 	for _, e := range startingComponents.Asgs {
-		suspendASGProceses(e)
+		manageASGProceses(e, "suspend")
 		if err != nil {
 			fmt.Printf("An error occurred while suspending processes on %s\n", e)
 			fmt.Printf("%s\n", err)
@@ -415,7 +406,7 @@ func main() {
 
 	fmt.Printf("Resuming rebalance process on ASGs: %v\n", startingComponents.Asgs)
 	for _, e := range startingComponents.Asgs {
-		resumeASGProceses(e)
+		manageASGProceses(e, "resume")
 		if err != nil {
 			fmt.Printf("An error occurred while resuming processes on %s\n", e)
 			fmt.Printf("%s\n", err)
