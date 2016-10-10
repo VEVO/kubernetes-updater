@@ -328,7 +328,7 @@ func terminateComponentInstances(component string, nodes []*ec2.Instance, wg *sy
 	return err
 }
 
-func main() {
+func init() {
 	// Force the use of ~/.aws/config
 	_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
 
@@ -351,7 +351,9 @@ func main() {
 	if appKey == "" {
 		log.Fatal("Please specify an env var DATADOG_APP_KEY that contains the datadog app key to use")
 	}
+}
 
+func main() {
 	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsProfile, awsRegion, cluster)
 	verboseLog(fmt.Sprintf("Kubernetes cluster is set to %s\n", kubernetesCluster))
 	verboseLog(fmt.Sprintf("AWS_PROFILE is set to %s\n", awsProfile))
