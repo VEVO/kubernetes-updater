@@ -379,6 +379,8 @@ func main() {
 		targetComponents = defaultComponents
 	}
 
+	verboseLog(fmt.Sprintf("Target components are set to %v\n", targetComponents))
+
 	// Iterate over the different groups of components performing terminations and verifications of each group concurrently
 	var wg sync.WaitGroup
 	for k, v := range initialInventory.Components {
