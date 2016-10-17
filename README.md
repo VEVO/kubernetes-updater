@@ -26,3 +26,15 @@ Additionally you can control which of the components (etcd, k8s-master and k8s-n
 ```
 ROLLER_COMPONENTS=k8s-master,k8s-node
 ```
+
+Example usage just specifying the cluster name
+
+```
+CLUSTER=infra stringer roll_cluster
+```
+
+```
+CLUSTER=infra ROLLER_COMPONENTS=etcd stringer roll_cluster
+```
+
+
