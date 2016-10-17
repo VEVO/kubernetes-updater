@@ -51,9 +51,9 @@ type hostDetails struct {
 	Status string `json:"status"`
 }
 
-type ec2Details struct {
+type inventory struct {
 	Components map[string][]*ec2.Instance
-	Asgs       []string
+	ASGs       []string
 }
 
 func verboseLog(l string) {
@@ -64,6 +64,70 @@ func verboseLog(l string) {
 
 func timeStamp() string {
 	return time.Now().Format(time.RFC822)
+}
+
+func (i *inventory) GetInventory() error {
+	svc := ec2.New(session.New())
+
+	params := &ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{
+				Name: aws.String("tag:KubernetesCluster"),
+				Values: []*string{
+					aws.String(strings.Join([]string{"*", kubernetesCluster, "*"}, "")),
+				},
+			},
+			{
+				Name: aws.String("instance-state-name"),
+				Values: []*string{
+					aws.String("running"),
+				},
+			},
+		},
+	}
+	resp, err := svc.DescribeInstances(params)
+	if err != nil {
+		return err
+	}
+
+	err = i.SortByComponent(resp)
+	return err
+}
+
+func (i *inventory) SortByComponent(r *ec2.DescribeInstancesOutput) error {
+	var err error
+
+	for idx := range r.Reservations {
+		for _, inst := range r.Reservations[idx].Instances {
+			var exists bool
+			var c string
+			var asg string
+			for _, tag := range inst.Tags {
+				if *tag.Key == "ServiceComponent" {
+					c = *tag.Value
+				}
+				if *tag.Key == "aws:autoscaling:groupName" {
+					asg = *tag.Value
+				}
+			}
+
+			i.Components[c] = append(i.Components[c], inst)
+			for _, seen := range i.ASGs {
+				if seen == asg {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				i.ASGs = append(i.ASGs, asg)
+			}
+		}
+	}
+	return err
+}
+
+func newInventory() *inventory {
+	return &inventory{Components: make(map[string][]*ec2.Instance)}
 }
 
 func getHostStatus(host string) (string, error) {
@@ -118,78 +182,6 @@ func getServerSpecResults() (ddResponse, error) {
 
 	verboseLog(fmt.Sprintf("Results from datadog: %+v\n", r))
 	return r, err
-}
-
-func describeInstances() (*ec2.DescribeInstancesOutput, error) {
-	svc := ec2.New(session.New())
-
-	params := &ec2.DescribeInstancesInput{
-		Filters: []*ec2.Filter{
-			{
-				Name: aws.String("tag:KubernetesCluster"),
-				Values: []*string{
-					aws.String(strings.Join([]string{"*", kubernetesCluster, "*"}, "")),
-				},
-			},
-			{
-				Name: aws.String("instance-state-name"),
-				Values: []*string{
-					aws.String("running"),
-				},
-			},
-		},
-	}
-
-	resp, err := svc.DescribeInstances(params)
-	return resp, err
-}
-
-func getSortedInstances() (*ec2Details, error) {
-	var d *ec2Details
-
-	i, err := describeInstances()
-	if err != nil {
-		return d, err
-	}
-
-	d = sortInstancesByComponent(i)
-	return d, err
-}
-
-func newEc2Details() *ec2Details {
-	return &ec2Details{Components: make(map[string][]*ec2.Instance)}
-}
-
-func sortInstancesByComponent(res *ec2.DescribeInstancesOutput) *ec2Details {
-	e := newEc2Details()
-
-	for idx := range res.Reservations {
-		var exists bool
-		var c string
-		var asg string
-		for _, inst := range res.Reservations[idx].Instances {
-			for _, tag := range inst.Tags {
-				if *tag.Key == "ServiceComponent" {
-					c = *tag.Value
-				}
-				if *tag.Key == "aws:autoscaling:groupName" {
-					asg = *tag.Value
-				}
-			}
-
-			e.Components[c] = append(e.Components[c], inst)
-			for _, seen := range e.Asgs {
-				if seen == asg {
-					exists = true
-					break
-				}
-			}
-			if !exists {
-				e.Asgs = append(e.Asgs, asg)
-			}
-		}
-	}
-	return e
 }
 
 func manageASGProceses(asg string, action string) (string, error) {
@@ -249,15 +241,17 @@ func terminateEC2Instance(i string) (*ec2.TerminateInstancesOutput, error) {
 func verifyReplacement(c string, t time.Time) error {
 	var newInstance string
 	var errString string
+	var err error
 	// Check for our new instance to get provisioned - loop for 15 minutes
 	for loop := 0; loop < 30; loop++ {
 		fmt.Printf("Checking AWS for replacement instances - %s\n", timeStamp())
-		currentComponents, err := getSortedInstances()
+		currentInventory := newInventory()
+		err = currentInventory.GetInventory()
 		if err != nil {
 			return err
 		}
-		verboseLog(fmt.Sprintf("The current components: %+v\n", currentComponents.Components))
-		for _, e := range currentComponents.Components[c] {
+		verboseLog(fmt.Sprintf("The current components: %+v\n", currentInventory.Components))
+		for _, e := range currentInventory.Components[c] {
 			if e.LaunchTime.After(t) {
 				newInstance = *e.InstanceId
 				fmt.Printf("Found our replacement instance %s\n", newInstance)
@@ -275,7 +269,6 @@ func verifyReplacement(c string, t time.Time) error {
 	}
 
 	var status string
-	var err error
 	for loop := 0; loop < 30; loop++ {
 		status, err = getHostStatus(newInstance)
 		fmt.Printf("Instance %s current status in datadog is %s - %s \n", newInstance, status, timeStamp())
@@ -324,6 +317,7 @@ func terminateComponentInstances(component string, nodes []*ec2.Instance, wg *sy
 		}
 
 	}
+
 	fmt.Printf("Completed termination of %s components\n", component)
 	return err
 }
@@ -358,24 +352,18 @@ func main() {
 	verboseLog(fmt.Sprintf("Kubernetes cluster is set to %s\n", kubernetesCluster))
 	verboseLog(fmt.Sprintf("AWS_PROFILE is set to %s\n", awsProfile))
 
-	/*
-		Starting components is where we take put our snapshot of EC2 resources when we start the program.  We filter out only instances that have a tag KubernetesCluster which matches the value defined in the env var KUBERNETES_CLUSTER.
-
-		Additionally each of these instances has another tag called ServiceComponent.  We group the like ServiceComponents in an array named with the value of the ServiceComponent.    For example "k8s-node" = [ instance1, instance2, instance3 ].
-
-		Also we get a list of autoscaling groups (ASG) so that we know which groups to suspend some processes in that may interfere with our rolling update"
-
-	*/
-	startingComponents, err := getSortedInstances()
+	// Get a current inventory broken down into an array for each component (k8s-node,k8s-master and etcd) as well a unique list of autoscalinggroups assocaited with the nodes
+	initialInventory := newInventory()
+	err := initialInventory.GetInventory()
 	if err != nil {
 		log.Fatalf("An error occurred getting the list of instances: %s\n", err.Error())
 	}
 
-	verboseLog(fmt.Sprintf("The starting components: %+v\n", startingComponents.Components))
-	verboseLog(fmt.Sprintf("The list of ASG's: %+q\n", startingComponents.Asgs))
+	verboseLog(fmt.Sprintf("The starting components: %+v\n", initialInventory.Components))
+	verboseLog(fmt.Sprintf("The list of ASG's: %+q\n", initialInventory.ASGs))
 
-	fmt.Printf("Suspending rebalance process on ASGs: %v\n", startingComponents.Asgs)
-	for _, e := range startingComponents.Asgs {
+	fmt.Printf("Suspending rebalance process on ASGs: %v\n", initialInventory.ASGs)
+	for _, e := range initialInventory.ASGs {
 		manageASGProceses(e, "suspend")
 		if err != nil {
 			fmt.Printf("An error occurred while suspending processes on %s\n", e)
@@ -391,10 +379,9 @@ func main() {
 		targetComponents = defaultComponents
 	}
 
-	/* Iterate over the different groups of components performing terminations and verifications of each group concurrently
-	 */
+	// Iterate over the different groups of components performing terminations and verifications of each group concurrently
 	var wg sync.WaitGroup
-	for k, v := range startingComponents.Components {
+	for k, v := range initialInventory.Components {
 		for _, c := range targetComponents {
 			if c == k {
 				wg.Add(1)
@@ -406,8 +393,8 @@ func main() {
 
 	wg.Wait()
 
-	fmt.Printf("Resuming rebalance process on ASGs: %v\n", startingComponents.Asgs)
-	for _, e := range startingComponents.Asgs {
+	fmt.Printf("Resuming rebalance process on ASGs: %v\n", initialInventory.ASGs)
+	for _, e := range initialInventory.ASGs {
 		manageASGProceses(e, "resume")
 		if err != nil {
 			fmt.Printf("An error occurred while resuming processes on %s\n", e)
