@@ -6,6 +6,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ var (
 	cluster           = os.Getenv("CLUSTER")
 	awsProfile        = os.Getenv("AWS_PROFILE")
 	awsRegion         = os.Getenv("AWS_REGION")
+	slackToken        = os.Getenv("SLACK_WEBHOOK")
 	kubernetesCluster string
 	verboseLogging    = os.Getenv("ROLLER_VERBOSE_MODE")
 	rollerComponents  = os.Getenv("ROLLER_COMPONENTS")
@@ -38,6 +40,10 @@ var (
 		"etcd",
 	}
 )
+
+type slackPost struct {
+	Text string `json:"text"`
+}
 
 type ddResponse struct {
 	State groupList `json:"state"`
@@ -64,6 +70,37 @@ func verboseLog(l string) {
 
 func timeStamp() string {
 	return time.Now().Format(time.RFC822)
+}
+
+func (s *slackPost) PostMessage() error {
+	client := &http.Client{}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(
+		"POST",
+		slackToken,
+		bytes.NewBuffer(b))
+
+	if err != nil {
+		return err
+	}
+
+	req.Header.Add("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	defer resp.Body.Close()
+	if err != nil {
+		return err
+	}
+
+	_, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	return err
 }
 
 func (i *inventory) GetInventory() error {
@@ -345,9 +382,15 @@ func init() {
 	if appKey == "" {
 		log.Fatal("Please specify an env var DATADOG_APP_KEY that contains the datadog app key to use")
 	}
+
+	if slackToken == "" {
+		log.Fatal("Please specify an env var SLACK_WEBHOOK that contains the slack webhook URL")
+	}
 }
 
 func main() {
+	var slack slackPost
+
 	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsProfile, awsRegion, cluster)
 	verboseLog(fmt.Sprintf("Kubernetes cluster is set to %s\n", kubernetesCluster))
 	verboseLog(fmt.Sprintf("AWS_PROFILE is set to %s\n", awsProfile))
@@ -379,6 +422,8 @@ func main() {
 		targetComponents = defaultComponents
 	}
 
+	slack.Text = fmt.Sprintf("Slack Integration - Starting a rolling update on cluster %s with the components %+v as the target components.", kubernetesCluster, targetComponents)
+	slack.PostMessage()
 	verboseLog(fmt.Sprintf("Target components are set to %v\n", targetComponents))
 
 	// Iterate over the different groups of components performing terminations and verifications of each group concurrently
@@ -394,6 +439,9 @@ func main() {
 	}
 
 	wg.Wait()
+
+	slack.Text = fmt.Sprintf("Completed a rolling update on cluster %s with the components %+v as the target components.", kubernetesCluster, targetComponents)
+	slack.PostMessage()
 
 	fmt.Printf("Resuming rebalance process on ASGs: %v\n", initialInventory.ASGs)
 	for _, e := range initialInventory.ASGs {
