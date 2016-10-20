@@ -25,6 +25,7 @@ import (
 )
 
 var (
+	//Leaving the DD env vars as we may use this for other monitors
 	apiKey            = os.Getenv("DATADOG_API_KEY")
 	appKey            = os.Getenv("DATADOG_APP_KEY")
 	cluster           = os.Getenv("CLUSTER")
@@ -43,18 +44,6 @@ var (
 
 type slackPost struct {
 	Text string `json:"text"`
-}
-
-type ddResponse struct {
-	State groupList `json:"state"`
-}
-
-type groupList struct {
-	Groups map[string]hostDetails `json:"groups"`
-}
-
-type hostDetails struct {
-	Status string `json:"status"`
 }
 
 type inventory struct {
@@ -169,56 +158,42 @@ func newInventory() *inventory {
 
 func getHostStatus(host string) (string, error) {
 	status := "Unset"
-	fmt.Printf("Checking datadog host status for %s\n", host)
-	data, err := getServerSpecResults()
+
+	sess, err := session.NewSession()
+	if err != nil {
+		log.Fatalf("failed to create session %v\n", err)
+	}
+
+	svc := ec2.New(sess)
+
+	params := &ec2.DescribeTagsInput{
+		Filters: []*ec2.Filter{
+			{
+				Name: aws.String("tag:healthy"),
+				Values: []*string{
+					aws.String("*"),
+				},
+			},
+			{
+				Name: aws.String("resource-id"),
+				Values: []*string{
+					aws.String(host),
+				},
+			},
+		},
+	}
+	resp, err := svc.DescribeTags(params)
 
 	if err != nil {
 		return status, err
 	}
 
-	for k, v := range data.State.Groups {
-		dataHost := strings.SplitAfter(k, ":")[1]
-		if host == dataHost {
-			status = v.Status
-			break
+	for _, tag := range resp.Tags {
+		if *tag.Key == "healthy" {
+			status = *tag.Value
 		}
 	}
 	return status, err
-}
-
-func getServerSpecResults() (ddResponse, error) {
-	var r ddResponse
-	client := &http.Client{}
-
-	ddURL := fmt.Sprintf("https://app.datadoghq.com/api/v1/monitor/965122?api_key=%s&application_key=%s&group_states=all", apiKey, appKey)
-
-	verboseLog(fmt.Sprintf("The datadog url is %s", ddURL))
-	req, err := http.NewRequest(
-		"GET",
-		ddURL,
-		nil)
-	if err != nil {
-		return r, err
-	}
-
-	resp, err := client.Do(req)
-	defer resp.Body.Close()
-	if err != nil {
-		return r, err
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return r, err
-	}
-
-	err = json.Unmarshal(body, &r)
-	if err != nil {
-		return r, err
-	}
-
-	verboseLog(fmt.Sprintf("Results from datadog: %+v\n", r))
-	return r, err
 }
 
 func manageASGProceses(asg string, action string) (string, error) {
@@ -310,18 +285,18 @@ func verifyReplacement(c string, t time.Time) error {
 	// nodes because they are hitting a bug https://vevowiki.atlassian.net/browse/SE-958
 	for loop := 0; loop < 45; loop++ {
 		status, err = getHostStatus(newInstance)
-		fmt.Printf("Instance %s current status in datadog is %s - %s \n", newInstance, status, timeStamp())
+		fmt.Printf("Instance %s current status is %s - %s \n", newInstance, status, timeStamp())
 		if err != nil {
 			return err
 		}
-		if status == "OK" {
+		if status == "True" {
 			fmt.Printf("Verification complete instance %s is healthy\n", newInstance)
 			return err
 		}
 		time.Sleep(time.Second * 60)
 	}
 
-	errString = fmt.Sprintf("The replacement instance %s has a status of %s so we are stopping the rolling update for component %s\n", newInstance, status, c)
+	errString = fmt.Sprintf("The replacement instance %s has a healthy state of %s so we are stopping the rolling update for component %s\n", newInstance, status, c)
 	return errors.New(errString)
 }
 
