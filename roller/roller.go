@@ -306,7 +306,9 @@ func verifyReplacement(c string, t time.Time) error {
 	}
 
 	var status string
-	for loop := 0; loop < 30; loop++ {
+	// Until we get onto docker 1.12 we need a long timeout for the etcd
+	// nodes because they are hitting a bug https://vevowiki.atlassian.net/browse/SE-958
+	for loop := 0; loop < 45; loop++ {
 		status, err = getHostStatus(newInstance)
 		fmt.Printf("Instance %s current status in datadog is %s - %s \n", newInstance, status, timeStamp())
 		if err != nil {
