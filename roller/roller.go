@@ -33,14 +33,22 @@ var (
 	awsRegion         = os.Getenv("AWS_REGION")
 	slackToken        = os.Getenv("SLACK_WEBHOOK")
 	kubernetesCluster string
+	rollSummary       *summary
 	verboseLogging    = os.Getenv("ROLLER_VERBOSE_MODE")
 	rollerComponents  = os.Getenv("ROLLER_COMPONENTS")
+	targetComponents  []string
 	defaultComponents = []string{
 		"k8s-node",
 		"k8s-master",
 		"etcd",
 	}
 )
+
+type summary struct {
+	Start     time.Time
+	Statuses  map[string]bool
+	Durations map[string]time.Time
+}
 
 type slackPost struct {
 	Text string `json:"text"`
@@ -62,6 +70,7 @@ func timeStamp() string {
 }
 
 func (s *slackPost) PostMessage() error {
+
 	client := &http.Client{}
 	b, err := json.Marshal(s)
 	if err != nil {
@@ -154,6 +163,12 @@ func (i *inventory) SortByComponent(r *ec2.DescribeInstancesOutput) error {
 
 func newInventory() *inventory {
 	return &inventory{Components: make(map[string][]*ec2.Instance)}
+}
+
+func newSummary() *summary {
+	return &summary{Start: time.Now(),
+		Statuses:  make(map[string]bool),
+		Durations: make(map[string]time.Time)}
 }
 
 func getHostStatus(host string) (string, error) {
@@ -327,13 +342,45 @@ func terminateComponentInstances(component string, nodes []*ec2.Instance, wg *sy
 		err = verifyReplacement(component, curTime)
 		if err != nil {
 			fmt.Println(err)
+			rollSummary.Durations[component] = time.Now()
 			return err
 		}
 
 	}
 
 	fmt.Printf("Completed termination of %s components\n", component)
+	rollSummary.Durations[component] = time.Now()
+	rollSummary.Statuses[component] = true
 	return err
+}
+
+func makeSummaryText() string {
+	var s string
+	var c string
+	var o string
+	b := true
+	for _, e := range targetComponents {
+		var l string
+		var ll string
+
+		if rollSummary.Statuses[e] {
+			l = fmt.Sprintf("Component %s completed succesfully.\n", e)
+		} else {
+			b = false
+			l = fmt.Sprintf("Component %s did not complete succesfully.\n", e)
+		}
+		ll = fmt.Sprintf("Component %s took %s to complete.\n", e, time.Since(rollSummary.Start))
+		c = c + l + ll
+	}
+
+	if b {
+		o = "and completed successfully"
+	} else {
+		o = "and did not complete succesfully"
+	}
+
+	s = fmt.Sprintf("Completed a rolling update on cluster %s with the components %+v as the target components.\nIt took %s to complete %s.\n", kubernetesCluster, targetComponents, time.Since(rollSummary.Start), o)
+	return s + c
 }
 
 func init() {
@@ -367,6 +414,7 @@ func init() {
 
 func main() {
 	var slack slackPost
+	rollSummary = newSummary()
 
 	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsProfile, awsRegion, cluster)
 	verboseLog(fmt.Sprintf("Kubernetes cluster is set to %s\n", kubernetesCluster))
@@ -391,7 +439,6 @@ func main() {
 		}
 	}
 
-	var targetComponents []string
 	// Figure out if we are rolling all components or just a subset
 	if rollerComponents != "" {
 		targetComponents = strings.Split(rollerComponents, ",")
@@ -416,8 +463,7 @@ func main() {
 	}
 
 	wg.Wait()
-
-	slack.Text = fmt.Sprintf("Completed a rolling update on cluster %s with the components %+v as the target components.", kubernetesCluster, targetComponents)
+	slack.Text = makeSummaryText()
 	slack.PostMessage()
 
 	fmt.Printf("Resuming rebalance process on ASGs: %v\n", initialInventory.ASGs)
