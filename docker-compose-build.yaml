@@ -1,0 +1,21 @@
+version: '2'
+
+services:
+  binary:
+    image: golang:1.7
+    volumes:
+      - ./:/go/src/a/${BINARY_NAME}
+    command: ${BINARY_BUILD_COMMAND}
+    working_dir: /go/src/a/${BINARY_NAME}
+    environment:
+      CGO_ENABLED: 0
+  release:
+    image: golang:1.7
+    command: ./push-to-github.sh
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      TAG: ${TAG}
+    volumes:
+      - ./:/go/src/a/${BINARY_NAME}
+    command: ./push-to-github.sh
+    working_dir: /go/src/a/${BINARY_NAME}
