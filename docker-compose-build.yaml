@@ -1,21 +1,32 @@
 version: '2'
 
 services:
+  godep:
+    image: golang:1.7
+    volumes:
+      - ./:/go
+    command: ./bin/godep-restore.sh
+    working_dir: /go
+  test:
+    image: golang:1.7
+    volumes:
+      - ./:/go
+    command: ./bin/run-test-suite.sh
+    working_dir: /go
   binary:
     image: golang:1.7
     volumes:
-      - ./:/go/src/a/${BINARY_NAME}
-    command: ${BINARY_BUILD_COMMAND}
-    working_dir: /go/src/a/${BINARY_NAME}
+      - ./:/go
+    command: ./bin/godep-build-binary.sh
+    working_dir: /go
     environment:
       CGO_ENABLED: 0
   release:
     image: golang:1.7
-    command: ./push-to-github.sh
+    command: ./bin/push-to-github.sh
     environment:
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       TAG: ${TAG}
     volumes:
       - ./:/go/src/a/${BINARY_NAME}
-    command: ./push-to-github.sh
     working_dir: /go/src/a/${BINARY_NAME}
