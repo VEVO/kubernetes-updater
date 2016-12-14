@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -47,7 +51,7 @@ type component struct {
 	name      string
 	start     time.Time
 	status    bool
-	instances map[string][]*ec2.Instance
+	instances []*ec2.Instance
 }
 
 type rollerState struct {
@@ -55,6 +59,7 @@ type rollerState struct {
 	startTime      time.Time
 	summaryMessage string
 	inventory      []*ec2.Instance
+	SlackText      string `json:"text"`
 }
 
 func newAWSCloudClient() *awsCloudClient {
@@ -73,12 +78,32 @@ func newAWSCloudClient() *awsCloudClient {
 	}
 }
 
-func (s *rollerState) PostStartMsg() error {
-	return nil
-}
+func (s *rollerState) SlackPost() error {
+	client := &http.Client{}
+	b, err := json.Marshal(s.SlackText)
+	if err != nil {
+		return err
+	}
 
-func (s *rollerState) PostSummaryMsg() error {
-	return nil
+	req, err := http.NewRequest(
+		"POST",
+		slackToken,
+		bytes.NewBuffer(b))
+
+	if err != nil {
+		return err
+	}
+
+	req.Header.Add("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	defer resp.Body.Close()
+	if err != nil {
+		return err
+	}
+
+	_, err = ioutil.ReadAll(resp.Body)
+	return err
 }
 
 func (c *awsCloudClient) EC2() *ec2.EC2 {
@@ -150,6 +175,34 @@ func (c *awsCloudClient) FiltersInstancesByTagValue(tagName, tagValue string, in
 	return results, nil
 }
 
+func (c *awsCloudClient) GetUniqueTagValues(tagName string, instances []*ec2.Instance) ([]string, error) {
+	var results []string
+	for _, instance := range instances {
+		var tagValue string
+		var exists bool
+
+		for _, tag := range instance.Tags {
+			if *tag.Key == tagName {
+				tagValue == *tag.Value
+				break
+			}
+		}
+
+		for _, seen := range results {
+			if seen == tagValue {
+				exists = true
+				break
+			}
+		}
+
+		if !exists {
+			results = append(results, tagValue)
+		}
+
+	}
+	return results, nil
+}
+
 func (c *awsCloudClient) addFilters(filters []*ec2.Filter) []*ec2.Filter {
 	for k, v := range c.filterTags {
 		filters = append(filters, newEC2Filter(k, v))
@@ -177,10 +230,65 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string) 
 
 	// Get list of instances by filter on tag ServiceComponent == component
 	//	params.Filters = append(params.Filters, newEC2Filter("tag:ServiceComponent", "k8s-master"))
+	i, err := c.InstancesMatchingTagValue("ServiceComponent", component, state.inventory)
+	if err != nil {
+		return err
+	}
+
+	a, err := c.GetUniqueTagValues("aws:autoscaling:groupName", i)
+	if err != nil {
+		return err
+	}
+
+	myComponent := &component{
+		name:      c,
+		start:     time.Now(),
+		instances: i,
+		asgs:      a}
 
 	// Pause autoscaling activities
+	for _, e := range myComponent.asgs {
+		c.manageASGProceses(e, "suspend")
+		if err != nil {
+			fmt.Printf("An error occurred while suspending processes on %s\n", e)
+			fmt.Printf("%s\n", err)
+		}
+	}
+
+	// Defer resume autoscaling activities
+	for _, e := range myComponent.asgs {
+		defer c.manageASGProceses(e, "resume")
+		if err != nil {
+			fmt.Printf("An error occurred while resuming processes on %s\n", e)
+			fmt.Printf("%s\n", err)
+		}
+	}
 	// Defer unpause autoscaling activities
 	return nil
+}
+
+func (c *awsCloudClient) manageASGProceses(asg string, action string) (string, error) {
+	var err error
+	var resp string
+
+	params := &autoscaling.ScalingProcessQuery{
+		AutoScalingGroupName: aws.String(asg),
+		ScalingProcesses: []*string{
+			aws.String("AZRebalance"),
+		},
+	}
+
+	if action == "suspend" {
+		var r *autoscaling.SuspendProcessesOutput
+		r, err = c.autoscaling.SuspendProcesses(params)
+		resp = r.String()
+	} else {
+		var r *autoscaling.ResumeProcessesOutput
+		r, err = c.autoscaling.ResumeProcesses(params)
+		resp = r.String()
+	}
+
+	return resp, err
 }
 
 func init() {
@@ -232,7 +340,8 @@ func main() {
 		targetComponents = defaultComponents
 	}
 
-	state.PostStartMsg()
+	state.SlackText = fmt.Sprintf("Starting a rolling update on cluster %s with the components %+v as the target components.", kubernetesCluster, targetComponents)
+	state.SlackPost()
 
 	var wg sync.WaitGroup
 	for _, component := range targetComponents {
@@ -241,5 +350,5 @@ func main() {
 	}
 
 	wg.Wait()
-	state.PostSummaryMsg()
+	state.SlackText = "summary here"
 }
