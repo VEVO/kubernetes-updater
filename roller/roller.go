@@ -34,6 +34,7 @@ var (
 		"k8s-master",
 		"etcd",
 	}
+	verboseLogging = "true"
 )
 
 type awsCloud interface {
@@ -47,19 +48,31 @@ type awsCloudClient struct {
 	filterTags  map[string]string
 }
 
-type component struct {
+type componentType struct {
 	name      string
 	start     time.Time
+	finish    time.Time
 	status    bool
 	instances []*ec2.Instance
+	asgs      []string
 }
 
 type rollerState struct {
-	components     []*component
+	components     []*componentType
 	startTime      time.Time
 	summaryMessage string
 	inventory      []*ec2.Instance
 	SlackText      string `json:"text"`
+}
+
+func timeStamp() string {
+	return time.Now().Format(time.RFC822)
+}
+
+func verboseLog(l string) {
+	if verboseLogging != "" {
+		fmt.Println(l)
+	}
 }
 
 func newAWSCloudClient() *awsCloudClient {
@@ -67,7 +80,7 @@ func newAWSCloudClient() *awsCloudClient {
 		"tag:KubernetesCluster": kubernetesCluster,
 		// We only want things that have completed an ansible run we will
 		// filter out the instances by version later.
-		"tag:version":         "*",
+		//"tag:version":         "*",
 		"instance-state-name": "running",
 	}
 
@@ -80,7 +93,7 @@ func newAWSCloudClient() *awsCloudClient {
 
 func (s *rollerState) SlackPost() error {
 	client := &http.Client{}
-	b, err := json.Marshal(s.SlackText)
+	b, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
@@ -106,6 +119,38 @@ func (s *rollerState) SlackPost() error {
 	return err
 }
 
+func (s *rollerState) Summary() error {
+	var summary string
+	status := "success"
+
+	for _, c := range s.components {
+		if c.status != true {
+			status = "failure"
+			break
+		}
+	}
+
+	duration := time.Since(s.startTime)
+	summary = fmt.Sprintf("Finished a rolling update on cluster %s with the components %+v as the target components.\nOverall status: %s\nOverall duration: %v\n", kubernetesCluster, rollerComponents, status, duration-(duration%time.Minute))
+
+	for _, c := range s.components {
+		var status string
+		duration := time.Since(c.start)
+		if c.status {
+			status = "success"
+		} else {
+			status = "failure"
+		}
+
+		cs := fmt.Sprintf("Component %s status: %s - duration: %v\n", c.name, status, duration-(duration%time.Minute))
+		summary = summary + cs
+	}
+
+	s.SlackText = summary
+	err := s.SlackPost()
+	return err
+}
+
 func (c *awsCloudClient) EC2() *ec2.EC2 {
 	return c.ec2
 }
@@ -121,6 +166,7 @@ func (c *awsCloudClient) DescribeInstances(request *ec2.DescribeInstancesInput) 
 
 	// Merge the default and request filters
 	request.Filters = c.addFilters(request.Filters)
+
 	for {
 		response, err := c.ec2.DescribeInstances(request)
 		if err != nil {
@@ -142,6 +188,38 @@ func (c *awsCloudClient) DescribeInstances(request *ec2.DescribeInstancesInput) 
 	// out the instances which do not match the desired ansible version
 	results, err := c.InstancesNotMatchingTagValue("version", ansibleVersion, results)
 	return results, err
+}
+
+func (c *awsCloudClient) getInstanceHealth(instance string) (string, error) {
+	status := "Unset"
+	params := &ec2.DescribeTagsInput{
+		Filters: []*ec2.Filter{
+			{
+				Name: aws.String("tag:healthy"),
+				Values: []*string{
+					aws.String("*"),
+				},
+			},
+			{
+				Name: aws.String("resource-id"),
+				Values: []*string{
+					aws.String(instance),
+				},
+			},
+		},
+	}
+
+	resp, err := c.ec2.DescribeTags(params)
+	if err != nil {
+		return status, err
+	}
+
+	for _, tag := range resp.Tags {
+		if *tag.Key == "healthy" {
+			status = *tag.Value
+		}
+	}
+	return status, err
 }
 
 func (c *awsCloudClient) InstancesMatchingTagValue(tagName, tagValue string, instances []*ec2.Instance) ([]*ec2.Instance, error) {
@@ -177,13 +255,14 @@ func (c *awsCloudClient) FiltersInstancesByTagValue(tagName, tagValue string, in
 
 func (c *awsCloudClient) GetUniqueTagValues(tagName string, instances []*ec2.Instance) ([]string, error) {
 	var results []string
+
 	for _, instance := range instances {
 		var tagValue string
 		var exists bool
 
 		for _, tag := range instance.Tags {
 			if *tag.Key == tagName {
-				tagValue == *tag.Value
+				tagValue = *tag.Value
 				break
 			}
 		}
@@ -226,8 +305,78 @@ func newEC2Filter(name string, value string) *ec2.Filter {
 	return filter
 }
 
-func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string) error {
+func (c *awsCloudClient) terminateInstance(instance string) (*ec2.TerminateInstancesOutput, error) {
+	var resp *ec2.TerminateInstancesOutput
+	var err error
 
+	verboseLog(fmt.Sprintf("Terminating instance %s\n", instance))
+
+	params := &ec2.TerminateInstancesInput{
+		InstanceIds: []*string{
+			aws.String(instance),
+		},
+		DryRun: aws.Bool(false),
+	}
+	resp, err = c.ec2.TerminateInstances(params)
+	return resp, err
+}
+
+func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) (string, error) {
+	var newInstance string
+	var err error
+
+	// Loop until we have a new healthy replacemen or time has expired
+	for loop := 0; loop < 30; loop++ {
+		fmt.Printf("Checking for replacement %s instance - %s\n", component, timeStamp())
+
+		params := &ec2.DescribeInstancesInput{}
+		params.Filters = []*ec2.Filter{newEC2Filter("tag:ServiceComponent", component)}
+		inv, err := c.DescribeInstances(params)
+		if err != nil {
+			log.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
+		}
+
+		for _, e := range inv {
+			if e.LaunchTime.After(t) {
+				newInstance = *e.InstanceId
+				fmt.Printf("Found our replacement instance %s\n", newInstance)
+			}
+		}
+
+		if newInstance != "" {
+			break
+		}
+		time.Sleep(time.Second * 30)
+	}
+
+	if newInstance == "" {
+		return newInstance, fmt.Errorf("Could not find a replacement %s instance.  Giving up!\n", component)
+	}
+	return newInstance, err
+}
+
+func (c *awsCloudClient) verifyReplacementInstance(instance string) error {
+	var err error
+	var status string
+
+	for loop := 0; loop < 30; loop++ {
+		status, err = c.getInstanceHealth(instance)
+		fmt.Printf("Instance %s current status is %s - %s \n", instance, status, timeStamp())
+		if err != nil {
+			return err
+		}
+
+		if status == "True" {
+			fmt.Printf("Verification complete instance %s is healthy\n", instance)
+			return err
+		}
+		time.Sleep(time.Second * 60)
+	}
+	return fmt.Errorf("Timed out waiting for instance %s to be healthy", instance)
+}
+
+func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, wg *sync.WaitGroup) error {
+	defer wg.Done()
 	// Get list of instances by filter on tag ServiceComponent == component
 	//	params.Filters = append(params.Filters, newEC2Filter("tag:ServiceComponent", "k8s-master"))
 	i, err := c.InstancesMatchingTagValue("ServiceComponent", component, state.inventory)
@@ -240,18 +389,19 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string) 
 		return err
 	}
 
-	myComponent := &component{
-		name:      c,
+	myComponent := &componentType{
+		name:      component,
 		start:     time.Now(),
 		instances: i,
 		asgs:      a}
+
+	state.components = append(state.components, myComponent)
 
 	// Pause autoscaling activities
 	for _, e := range myComponent.asgs {
 		c.manageASGProceses(e, "suspend")
 		if err != nil {
-			fmt.Printf("An error occurred while suspending processes on %s\n", e)
-			fmt.Printf("%s\n", err)
+			return fmt.Errorf("An error occurred while suspending processes on %s\n Error: %s\n", e, err)
 		}
 	}
 
@@ -259,11 +409,30 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string) 
 	for _, e := range myComponent.asgs {
 		defer c.manageASGProceses(e, "resume")
 		if err != nil {
-			fmt.Printf("An error occurred while resuming processes on %s\n", e)
-			fmt.Printf("%s\n", err)
+			return fmt.Errorf("An error occurred while resuming processes on %s\n Error: %s\n", e, err)
 		}
 	}
-	// Defer unpause autoscaling activities
+
+	for _, n := range myComponent.instances {
+		r, err := c.terminateInstance(*n.InstanceId)
+		if err != nil {
+			return fmt.Errorf("An error occurred while terminating instance %s\n Error: %s\n Response: %s\n", *n.InstanceId, err, r)
+		}
+
+		newInstance, err := c.findReplacementInstance(component, time.Now())
+		if err != nil {
+			return fmt.Errorf("An error occurred finding the replacement instance for component %s\n Error: %s\n", component, err)
+		}
+
+		err = c.verifyReplacementInstance(newInstance)
+		if err != nil {
+			return fmt.Errorf("An error occurred verifying the health of instance %s\n Error: %s\n", newInstance, err)
+		}
+	}
+
+	myComponent.status = true
+	myComponent.finish = time.Now()
+
 	return nil
 }
 
@@ -341,14 +510,22 @@ func main() {
 	}
 
 	state.SlackText = fmt.Sprintf("Starting a rolling update on cluster %s with the components %+v as the target components.", kubernetesCluster, targetComponents)
-	state.SlackPost()
+
+	err = state.SlackPost()
+	if err != nil {
+		fmt.Printf("An error occurred psting to slack.\nError %s\n", err)
+	}
 
 	var wg sync.WaitGroup
 	for _, component := range targetComponents {
 		wg.Add(1)
-		go cloud.terminateAndVerifyComponentInstances(component)
+		go cloud.terminateAndVerifyComponentInstances(component, &wg)
 	}
 
 	wg.Wait()
-	state.SlackText = "summary here"
+
+	err = state.Summary()
+	if err != nil {
+		fmt.Printf("An error occurred psting to slack.\nError %s\n", err)
+	}
 }
