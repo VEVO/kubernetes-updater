@@ -20,7 +20,7 @@ import (
 
 var (
 	cluster           = os.Getenv("CLUSTER")
-	awsProfile        = os.Getenv("AWS_PROFILE")
+	awsAccount        = os.Getenv("AWS_ACCOUNT")
 	awsRegion         = os.Getenv("AWS_REGION")
 	slackToken        = os.Getenv("SLACK_WEBHOOK")
 	rollerComponents  = os.Getenv("ROLLER_COMPONENTS")
@@ -58,11 +58,10 @@ type componentType struct {
 }
 
 type rollerState struct {
-	components     []*componentType
-	startTime      time.Time
-	summaryMessage string
-	inventory      []*ec2.Instance
-	SlackText      string `json:"text"`
+	components []*componentType
+	startTime  time.Time
+	inventory  []*ec2.Instance
+	SlackText  string `json:"text"`
 }
 
 func timeStamp() string {
@@ -124,14 +123,14 @@ func (s *rollerState) Summary() error {
 	status := "success"
 
 	for _, c := range s.components {
-		if c.status != true {
+		if !c.status {
 			status = "failure"
 			break
 		}
 	}
 
 	duration := time.Since(s.startTime)
-	summary = fmt.Sprintf("Finished a rolling update on cluster %s with the components %+v as the target components.\nOverall status: %s\nOverall duration: %v\n", kubernetesCluster, rollerComponents, status, duration-(duration%time.Minute))
+	summary = fmt.Sprintf("Finished a rolling update on cluster %s with the components %+v as the target components.\nOverall status: %s\nOverall duration: %v\n", kubernetesCluster, targetComponents, status, duration-(duration%time.Minute))
 
 	for _, c := range s.components {
 		var status string
@@ -187,6 +186,7 @@ func (c *awsCloudClient) DescribeInstances(request *ec2.DescribeInstancesInput) 
 	// Apparently negative filters do not work with AWS so here we filter
 	// out the instances which do not match the desired ansible version
 	results, err := c.InstancesNotMatchingTagValue("version", ansibleVersion, results)
+
 	return results, err
 }
 
@@ -324,6 +324,7 @@ func (c *awsCloudClient) terminateInstance(instance string) (*ec2.TerminateInsta
 func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) (string, error) {
 	var newInstance string
 	var err error
+	var inv []*ec2.Instance
 
 	// Loop until we have a new healthy replacemen or time has expired
 	for loop := 0; loop < 30; loop++ {
@@ -331,12 +332,14 @@ func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) 
 
 		params := &ec2.DescribeInstancesInput{}
 		params.Filters = []*ec2.Filter{newEC2Filter("tag:ServiceComponent", component)}
-		inv, err := c.DescribeInstances(params)
+		inv, err = c.DescribeInstances(params)
+		fmt.Printf("The returned inventory for find replacement is %v", inv)
 		if err != nil {
 			log.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
 		}
 
 		for _, e := range inv {
+			fmt.Printf("In find replacement for loop instance is %s", *e.InstanceId)
 			if e.LaunchTime.After(t) {
 				newInstance = *e.InstanceId
 				fmt.Printf("Found our replacement instance %s\n", newInstance)
@@ -350,8 +353,10 @@ func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) 
 	}
 
 	if newInstance == "" {
+		fmt.Printf("Exiting find with an error")
 		return newInstance, fmt.Errorf("Could not find a replacement %s instance.  Giving up!\n", component)
 	}
+	fmt.Printf("Exiting find without an error")
 	return newInstance, err
 }
 
@@ -399,7 +404,7 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, 
 
 	// Pause autoscaling activities
 	for _, e := range myComponent.asgs {
-		c.manageASGProceses(e, "suspend")
+		_, err = c.manageASGProceses(e, "suspend")
 		if err != nil {
 			return fmt.Errorf("An error occurred while suspending processes on %s\n Error: %s\n", e, err)
 		}
@@ -414,12 +419,13 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, 
 	}
 
 	for _, n := range myComponent.instances {
+		terminateTime := time.Now()
 		r, err := c.terminateInstance(*n.InstanceId)
 		if err != nil {
 			return fmt.Errorf("An error occurred while terminating instance %s\n Error: %s\n Response: %s\n", *n.InstanceId, err, r)
 		}
 
-		newInstance, err := c.findReplacementInstance(component, time.Now())
+		newInstance, err := c.findReplacementInstance(component, terminateTime)
 		if err != nil {
 			return fmt.Errorf("An error occurred finding the replacement instance for component %s\n Error: %s\n", component, err)
 		}
@@ -464,29 +470,27 @@ func init() {
 	// Force the use of ~/.aws/config
 	_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
 
-	// for testing
-	_ = os.Setenv("AWS_PROFILE", "dev")
-	_ = os.Setenv("AWS_REGION", "us-east-1")
-	_ = os.Setenv("CLUSTER", "infra")
-	_ = os.Setenv("ANSIBLE_VERSION", "EXAMPLE_VERSION")
-
 	if cluster == "" {
-		log.Fatal("Please specify an env var CLUSTER that contains the name of the target kubernetes cluster")
+		log.Fatal("Set the CLUSTER variable to the name of the target kubernetes cluster")
 	}
 
 	if awsRegion == "" {
-		log.Fatal("Please specify an env var AWS_REGION that contains the name of the desired AWS region")
+		log.Fatal("Set the AWS_REGION variable to the name of the desired AWS region")
 	}
 
-	if awsProfile == "" {
-		log.Fatal("Please specify an env var AWS_PROFILE that contains the name of the desired AWS environemnt")
+	if awsAccount == "" {
+		log.Fatal("Set the AWS_ACCOUNT variable to the name of the desired AWS environemnt")
 	}
 
 	if ansibleVersion == "" {
-		log.Fatal("Please specify an env var ANSIBLE_VERSION that contains desired ansible git sha")
+		log.Fatal("Set the ANSIBLE_VERSION variable to the desired ansible git sha")
 	}
 
-	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsProfile, awsRegion, cluster)
+	if slackToken == "" {
+		log.Fatal("Set the SLACK_WEBHOOK variable to desired webhook")
+	}
+
+	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsAccount, awsRegion, cluster)
 }
 
 func main() {
@@ -509,7 +513,7 @@ func main() {
 		targetComponents = defaultComponents
 	}
 
-	state.SlackText = fmt.Sprintf("Starting a rolling update on cluster %s with the components %+v as the target components.", kubernetesCluster, targetComponents)
+	state.SlackText = fmt.Sprintf("Starting a rolling update on cluster %s with the components %+v as the target components.\nAnsible version is set to %s\n", kubernetesCluster, targetComponents, ansibleVersion)
 
 	err = state.SlackPost()
 	if err != nil {
