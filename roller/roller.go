@@ -410,10 +410,6 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, 
 		if err != nil {
 			return err
 		}
-		fmt.Printf("contents of e %v", e)
-		fmt.Printf("contents of i %v", i)
-		fmt.Printf("len of e %d", len(e))
-		fmt.Printf("len of i %d", len(i))
 		var ee []*string
 		var ii []*string
 		for _, r := range e {
@@ -423,17 +419,12 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, 
 			ii = append(ii, q.InstanceId)
 		}
 
-		fmt.Printf("contents of ee %v", ee)
-		fmt.Printf("contents of ii %v", ii)
-
 		if len(e) != len(i) {
 			myComponent.err = fmt.Errorf("Etcd components are not healthy.  Please fix and run again")
 			verboseLog(fmt.Sprintf("%s", myComponent.err))
 			return myComponent.err
 		}
 	}
-
-	return nil
 
 	var instanceList []string
 	for _, e := range myComponent.instances {
@@ -562,7 +553,7 @@ func main() {
 
 	state.SlackText = fmt.Sprintf("Starting a rolling update on cluster %s with the components %+v as the target components.\nAnsible version is set to %s\n", kubernetesCluster, targetComponents, ansibleVersion)
 
-	//	err = state.SlackPost()
+	err = state.SlackPost()
 	verboseLog(fmt.Sprintf("Slack Post: %s", state.SlackText))
 	if err != nil {
 		fmt.Printf("An error occurred psting to slack.\nError %s\n", err)
@@ -576,7 +567,7 @@ func main() {
 
 	wg.Wait()
 
-	//	err = state.Summary()
+	err = state.Summary()
 	if err != nil {
 		fmt.Printf("An error occurred psting to slack.\nError %s\n", err)
 	}
