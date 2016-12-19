@@ -55,6 +55,7 @@ type componentType struct {
 	status    bool
 	instances []*ec2.Instance
 	asgs      []string
+	err       error
 }
 
 type rollerState struct {
@@ -142,6 +143,10 @@ func (s *rollerState) Summary() error {
 		}
 
 		cs := fmt.Sprintf("Component %s status: %s - duration: %v\n", c.name, status, duration-(duration%time.Minute))
+		if c.err != nil {
+			cs = cs + fmt.Sprintf("Component %s error: %s\n", c.name, c.err)
+		}
+
 		summary = summary + cs
 	}
 
@@ -328,21 +333,18 @@ func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) 
 
 	// Loop until we have a new healthy replacemen or time has expired
 	for loop := 0; loop < 30; loop++ {
-		fmt.Printf("Checking for replacement %s instance - %s\n", component, timeStamp())
+		fmt.Printf("Checking for replacement %s instance - %s - loop %d\n", component, timeStamp(), loop)
 
 		params := &ec2.DescribeInstancesInput{}
 		params.Filters = []*ec2.Filter{newEC2Filter("tag:ServiceComponent", component)}
 		inv, err = c.DescribeInstances(params)
-		fmt.Printf("The returned inventory for find replacement is %v", inv)
 		if err != nil {
 			log.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
 		}
 
 		for _, e := range inv {
-			fmt.Printf("In find replacement for loop instance is %s", *e.InstanceId)
 			if e.LaunchTime.After(t) {
 				newInstance = *e.InstanceId
-				fmt.Printf("Found our replacement instance %s\n", newInstance)
 			}
 		}
 
@@ -353,31 +355,31 @@ func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) 
 	}
 
 	if newInstance == "" {
-		fmt.Printf("Exiting find with an error")
+		fmt.Printf("Exiting find with an error for component %s", component)
 		return newInstance, fmt.Errorf("Could not find a replacement %s instance.  Giving up!\n", component)
 	}
-	fmt.Printf("Exiting find without an error")
+	verboseLog(fmt.Sprintf("Exiting find without an error for component %s", component))
 	return newInstance, err
 }
 
-func (c *awsCloudClient) verifyReplacementInstance(instance string) error {
+func (c *awsCloudClient) verifyReplacementInstance(component string, instance string) error {
 	var err error
 	var status string
 
 	for loop := 0; loop < 30; loop++ {
 		status, err = c.getInstanceHealth(instance)
-		fmt.Printf("Instance %s current status is %s - %s \n", instance, status, timeStamp())
+		fmt.Printf("Component %s instance %s current status is %s - %s \n", component, instance, status, timeStamp())
 		if err != nil {
 			return err
 		}
 
 		if status == "True" {
-			fmt.Printf("Verification complete instance %s is healthy\n", instance)
+			fmt.Printf("Verification complete component %s instance %s is healthy\n", component, instance)
 			return err
 		}
 		time.Sleep(time.Second * 60)
 	}
-	return fmt.Errorf("Timed out waiting for instance %s to be healthy", instance)
+	return fmt.Errorf("Timed out waiting for component %s instance %s to be healthy", component, instance)
 }
 
 func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, wg *sync.WaitGroup) error {
@@ -402,6 +404,43 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, 
 
 	state.components = append(state.components, myComponent)
 
+	if component == "etcd" {
+		var e []*ec2.Instance
+		e, err = c.InstancesMatchingTagValue("healthy", "True", myComponent.instances)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("contents of e %v", e)
+		fmt.Printf("contents of i %v", i)
+		fmt.Printf("len of e %d", len(e))
+		fmt.Printf("len of i %d", len(i))
+		var ee []*string
+		var ii []*string
+		for _, r := range e {
+			ee = append(ee, r.InstanceId)
+		}
+		for _, q := range e {
+			ii = append(ii, q.InstanceId)
+		}
+
+		fmt.Printf("contents of ee %v", ee)
+		fmt.Printf("contents of ii %v", ii)
+
+		if len(e) != len(i) {
+			myComponent.err = fmt.Errorf("Etcd components are not healthy.  Please fix and run again")
+			verboseLog(fmt.Sprintf("%s", myComponent.err))
+			return myComponent.err
+		}
+	}
+
+	return nil
+
+	var instanceList []string
+	for _, e := range myComponent.instances {
+		instanceList = append(instanceList, *e.InstanceId)
+	}
+	verboseLog(fmt.Sprintf("Component %s has starting instance Ids %v\n", component, instanceList))
+
 	// Pause autoscaling activities
 	for _, e := range myComponent.asgs {
 		_, err = c.manageASGProceses(e, "suspend")
@@ -418,27 +457,35 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, 
 		}
 	}
 
+	verboseLog(fmt.Sprintf("Starting instance termination verify loop for component %s", myComponent.name))
 	for _, n := range myComponent.instances {
 		terminateTime := time.Now()
 		r, err := c.terminateInstance(*n.InstanceId)
 		if err != nil {
-			return fmt.Errorf("An error occurred while terminating instance %s\n Error: %s\n Response: %s\n", *n.InstanceId, err, r)
+			err = fmt.Errorf("An error occurred while terminating %s instance %s\n Error: %s\n Response: %s\n", myComponent.name, *n.InstanceId, err, r)
+			verboseLog(fmt.Sprintf("%s", err))
+			return err
 		}
 
 		newInstance, err := c.findReplacementInstance(component, terminateTime)
 		if err != nil {
-			return fmt.Errorf("An error occurred finding the replacement instance for component %s\n Error: %s\n", component, err)
+			err = fmt.Errorf("An error occurred finding the replacement instance for component %s\n Error: %s\n", component, err)
+			verboseLog(fmt.Sprintf("%s", err))
+			return err
 		}
 
-		err = c.verifyReplacementInstance(newInstance)
+		err = c.verifyReplacementInstance(component, newInstance)
 		if err != nil {
-			return fmt.Errorf("An error occurred verifying the health of instance %s\n Error: %s\n", newInstance, err)
+			err = fmt.Errorf("An error occurred verifying the health of instance %s\n Error: %s\n", newInstance, err)
+			verboseLog(fmt.Sprintf("%s", err))
+			return err
 		}
 	}
 
 	myComponent.status = true
 	myComponent.finish = time.Now()
 
+	verboseLog(fmt.Sprintf("Completed normal instance termination verify loop for component %s", myComponent.name))
 	return nil
 }
 
@@ -515,7 +562,8 @@ func main() {
 
 	state.SlackText = fmt.Sprintf("Starting a rolling update on cluster %s with the components %+v as the target components.\nAnsible version is set to %s\n", kubernetesCluster, targetComponents, ansibleVersion)
 
-	err = state.SlackPost()
+	//	err = state.SlackPost()
+	verboseLog(fmt.Sprintf("Slack Post: %s", state.SlackText))
 	if err != nil {
 		fmt.Printf("An error occurred psting to slack.\nError %s\n", err)
 	}
@@ -528,8 +576,9 @@ func main() {
 
 	wg.Wait()
 
-	err = state.Summary()
+	//	err = state.Summary()
 	if err != nil {
 		fmt.Printf("An error occurred psting to slack.\nError %s\n", err)
 	}
+	verboseLog(fmt.Sprintf("Slack Post: %s", state.SlackText))
 }
