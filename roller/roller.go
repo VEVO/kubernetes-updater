@@ -30,6 +30,7 @@ var (
 	appKey            = os.Getenv("DATADOG_APP_KEY")
 	cluster           = os.Getenv("CLUSTER")
 	awsProfile        = os.Getenv("AWS_PROFILE")
+	awsAccount        = os.Getenv("AWS_ACCOUNT")
 	awsRegion         = os.Getenv("AWS_REGION")
 	slackToken        = os.Getenv("SLACK_WEBHOOK")
 	kubernetesCluster string
@@ -395,8 +396,8 @@ func init() {
 		log.Fatal("Please specify an env var AWS_REGION that contains the name of the desired AWS region")
 	}
 
-	if awsProfile == "" {
-		log.Fatal("Please specify an env var AWS_PROFILE that contains the name of the desired AWS environemnt")
+	if awsProfile == "" && awsAccount == "" {
+		log.Fatal("You must specifiy one of AWS_PROFILE or AWS_ACCOUNT")
 	}
 
 	if apiKey == "" {
@@ -416,9 +417,13 @@ func main() {
 	var slack slackPost
 	rollSummary = newSummary()
 
-	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsProfile, awsRegion, cluster)
+	if awsAccount != "" {
+		kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsAccount, awsRegion, cluster)
+	} else {
+		kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsProfile, awsRegion, cluster)
+	}
+
 	verboseLog(fmt.Sprintf("Kubernetes cluster is set to %s\n", kubernetesCluster))
-	verboseLog(fmt.Sprintf("AWS_PROFILE is set to %s\n", awsProfile))
 
 	// Get a current inventory broken down into an array for each component (k8s-node,k8s-master and etcd) as well a unique list of autoscalinggroups assocaited with the nodes
 	initialInventory := newInventory()
