@@ -355,10 +355,10 @@ func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) 
 	}
 
 	if newInstance == "" {
-		fmt.Printf("Exiting find with an error for component %s", component)
+		fmt.Printf("Exiting find with an error for component %s.\n", component)
 		return newInstance, fmt.Errorf("Could not find a replacement %s instance.  Giving up!\n", component)
 	}
-	verboseLog(fmt.Sprintf("Exiting find without an error for component %s", component))
+	verboseLog(fmt.Sprintf("Exiting find without an error for component %s.\n", component))
 	return newInstance, err
 }
 
