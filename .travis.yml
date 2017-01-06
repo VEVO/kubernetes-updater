@@ -8,7 +8,7 @@ install:
   - go get github.com/tools/godep
   - echo $PWD
   - ls -al
-  - godep go build
+  - cd roller && godep go build
 deploy:
   skip_cleanup: true
   provider: releases
