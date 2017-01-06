@@ -5,6 +5,9 @@ install:
   # Add Godeps dependencies to GOPATH and PATH
   - export GOPATH="${TRAVIS_BUILD_DIR}/roller/Godeps/_workspace:$GOPATH"
   - export PATH="${TRAVIS_BUILD_DIR}/roller/Godeps/_workspace/bin:$PATH"
+  - echo $PWD
+  - ls -al
+  - godep go build
 deploy:
   skip_cleanup: true
   provider: releases
