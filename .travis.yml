@@ -1,8 +1,6 @@
 language: go
 go:
 - 1.7
-script:
-  - cd roller && go build .
 deploy:
   skip_cleanup: true
   provider: releases
