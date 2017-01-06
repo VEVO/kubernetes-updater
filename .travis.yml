@@ -2,7 +2,7 @@ language: go
 go:
 - 1.7
 script:
-  - cd roller && go build .
+  - cd roller && go build . && ls -arlt && pwd && ls -arlt ..
 deploy:
   provider: releases
   api_key:
