@@ -2,8 +2,10 @@ language: go
 sudo: false
 go: 1.7
 install:
-  - go build -v .
-  - echo ls -al $TRAVIS_BUILD_DIR
+  - export GOPATH="${TRAVIS_BUILD_DIR}/Godeps/_workspace:$GOPATH"
+  - export PATH="${TRAVIS_BUILD_DIR}/Godeps/_workspace/bin:$PATH"
+  - go get github.com/tools/godep
+  - godep go build
 deploy:
   skip_cleanup: true
   provider: releases
