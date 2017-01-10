@@ -342,6 +342,12 @@ func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) 
 			log.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
 		}
 
+		var instanceList []string
+		for _, e := range inv {
+			instanceList = append(instanceList, *e.InstanceId)
+		}
+		verboseLog(fmt.Sprintf("In checking for loop current inv for component %s Ids %v\n", component, instanceList))
+
 		for _, e := range inv {
 			if e.LaunchTime.After(t) {
 				newInstance = *e.InstanceId
