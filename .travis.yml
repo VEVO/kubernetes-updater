@@ -1,11 +1,9 @@
 language: go
 sudo: false
 go: 1.7
-before_deploy:
-- export OS_TARGETS="linux"
-- export ARCH_TARGETS="amd64"
-- go get github.com/mitchellh/gox
-- gox -os "$OS_TARGETS" -arch="$ARCH_TARGETS"
+install:
+  - go build -v .
+  - echo ls -al $TRAVIS_BUILD_DIR
 deploy:
   skip_cleanup: true
   provider: releases
@@ -15,7 +13,7 @@ deploy:
     repo: VEVO/kubernetes-updater
     branch: gocd
   file:
-    - roller_linux_amd64
+    - roller
   on:
     tags: true
     repo: VEVO/kubernetes-updater
