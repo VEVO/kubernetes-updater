@@ -15,4 +15,3 @@ deploy:
   on:
     repo: VEVO/kubernetes-updater
     tags: true
-    all_branches: true
