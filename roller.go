@@ -512,7 +512,7 @@ func (c *awsCloudClient) manageASGProceses(asg string, action string) (string, e
 
 func init() {
 	// Force the use of ~/.aws/config
-	_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
+	//_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
 
 	if cluster == "" {
 		log.Fatal("Set the CLUSTER variable to the name of the target kubernetes cluster")
