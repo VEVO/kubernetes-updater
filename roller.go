@@ -21,6 +21,7 @@ import (
 var (
 	cluster           = os.Getenv("CLUSTER")
 	awsAccount        = os.Getenv("AWS_ACCOUNT")
+	awsProfile        = os.Getenv("AWS_PROFILE")
 	awsRegion         = os.Getenv("AWS_REGION")
 	slackToken        = os.Getenv("SLACK_WEBHOOK")
 	rollerComponents  = os.Getenv("ROLLER_COMPONENTS")
@@ -346,7 +347,6 @@ func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) 
 		for _, e := range inv {
 			instanceList = append(instanceList, *e.InstanceId)
 		}
-		verboseLog(fmt.Sprintf("In checking for loop current inv for component %s Ids %v\n", component, instanceList))
 
 		for _, e := range inv {
 			if e.LaunchTime.After(t) {
@@ -511,9 +511,6 @@ func (c *awsCloudClient) manageASGProceses(asg string, action string) (string, e
 }
 
 func init() {
-	// Force the use of ~/.aws/config
-	//_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
-
 	if cluster == "" {
 		log.Fatal("Set the CLUSTER variable to the name of the target kubernetes cluster")
 	}
@@ -522,8 +519,8 @@ func init() {
 		log.Fatal("Set the AWS_REGION variable to the name of the desired AWS region")
 	}
 
-	if awsAccount == "" {
-		log.Fatal("Set the AWS_ACCOUNT variable to the name of the desired AWS environemnt")
+	if awsAccount == "" && awsProfile == "" {
+		log.Fatal("Set one of the variables AWS_ACCOUNT or AWS_PROFILE")
 	}
 
 	if ansibleVersion == "" {
@@ -534,7 +531,13 @@ func init() {
 		log.Fatal("Set the SLACK_WEBHOOK variable to desired webhook")
 	}
 
-	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsAccount, awsRegion, cluster)
+	if awsAccount == "" {
+		// Force the use of ~/.aws/config when awsProfile is set
+		_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
+		kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsProfile, awsRegion, cluster)
+	} else {
+		kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsAccount, awsRegion, cluster)
+	}
 }
 
 func main() {
