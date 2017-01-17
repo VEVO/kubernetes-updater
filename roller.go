@@ -568,6 +568,7 @@ func enableClusterAutoscaler(*rollerState) {
 }
 
 func init() {
+	_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
 
 	if cluster == "" {
 		log.Fatal("Set the CLUSTER variable to the name of the target kubernetes cluster")
@@ -589,13 +590,7 @@ func init() {
 		log.Fatal("Set the SLACK_WEBHOOK variable to desired webhook")
 	}
 
-	if awsAccount != "" && awsProfile != "" {
-		// Force the use of ~/.aws/config when awsProfile is set
-		_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
-		kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsProfile, awsRegion, cluster)
-	} else {
-		kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsAccount, awsRegion, cluster)
-	}
+	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsAccount, awsRegion, cluster)
 
 	if kubernetesUsername == "" {
 		log.Fatal("Set the KUBERNETES_USERNAME variable to desired kubernetes username")
