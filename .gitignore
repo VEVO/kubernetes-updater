@@ -1,3 +1,7 @@
 roller
 stringer_build
 stringer_spec
+bin/godep
+pkg
+src
+vendor

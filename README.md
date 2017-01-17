@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/VEVO/kubernetes-updater.svg?branch=master)](https://travis-ci.org/VEVO/kubernetes-updater)
+
 # kubernetes-updater
 Rolling updates of kubernetes clusters
 

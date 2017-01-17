@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -19,23 +20,28 @@ import (
 )
 
 var (
-	cluster           = os.Getenv("CLUSTER")
-	awsAccount        = os.Getenv("AWS_ACCOUNT")
-	awsProfile        = os.Getenv("AWS_PROFILE")
-	awsRegion         = os.Getenv("AWS_REGION")
-	slackToken        = os.Getenv("SLACK_WEBHOOK")
-	rollerComponents  = os.Getenv("ROLLER_COMPONENTS")
-	ansibleVersion    = os.Getenv("ANSIBLE_VERSION")
-	cloud             *awsCloudClient
-	state             *rollerState
-	kubernetesCluster string
-	targetComponents  []string
-	defaultComponents = []string{
+	cluster            = os.Getenv("CLUSTER")
+	awsAccount         = os.Getenv("AWS_ACCOUNT")
+	awsProfile         = os.Getenv("AWS_PROFILE")
+	awsRegion          = os.Getenv("AWS_REGION")
+	slackToken         = os.Getenv("SLACK_WEBHOOK")
+	rollerComponents   = os.Getenv("ROLLER_COMPONENTS")
+	ansibleVersion     = os.Getenv("ANSIBLE_VERSION")
+	kubernetesUsername = os.Getenv("KUBERNETES_USERNAME")
+	kubernetesPassword = os.Getenv("KUBERNETES_PASSWORD")
+	cloud              *awsCloudClient
+	state              *rollerState
+	kubernetesCluster  string
+	kubernetesEndpoint string
+	targetComponents   []string
+	defaultComponents  = []string{
 		"k8s-node",
 		"k8s-master",
 		"etcd",
 	}
-	verboseLogging = "true"
+	clusterAutoscalerServiceName      = "cluster-autoscaler"
+	clusterAutoscalerServiceNamespace = "kube-system"
+	verboseLogging                    = "true"
 )
 
 type awsCloud interface {
@@ -60,10 +66,17 @@ type componentType struct {
 }
 
 type rollerState struct {
-	components []*componentType
-	startTime  time.Time
-	inventory  []*ec2.Instance
-	SlackText  string `json:"text"`
+	components        []*componentType
+	startTime         time.Time
+	inventory         []*ec2.Instance
+	SlackText         string `json:"text"`
+	clusterAutoscaler clusterAutoscalerState
+}
+
+type clusterAutoscalerState struct {
+	enabled bool
+	status  string
+	err     error
 }
 
 func timeStamp() string {
@@ -131,6 +144,10 @@ func (s *rollerState) Summary() error {
 		}
 	}
 
+	if s.clusterAutoscaler.status == "failure" {
+		status = "failure"
+	}
+
 	duration := time.Since(s.startTime)
 	summary = fmt.Sprintf("Finished a rolling update on cluster %s with the components %+v as the target components.\nOverall status: %s\nOverall duration: %v\n", kubernetesCluster, targetComponents, status, duration-(duration%time.Minute))
 
@@ -150,6 +167,8 @@ func (s *rollerState) Summary() error {
 
 		summary = summary + cs
 	}
+
+	summary = summary + fmt.Sprintf("Cluster autoscaler enabled: %t, status: %s", s.clusterAutoscaler.enabled, s.clusterAutoscaler.status)
 
 	s.SlackText = summary
 	err := s.SlackPost()
@@ -510,7 +529,46 @@ func (c *awsCloudClient) manageASGProceses(asg string, action string) (string, e
 	return resp, err
 }
 
+func setReplicas(replicas int32) error {
+	client := NewClient(kubernetesEndpoint, kubernetesUsername, kubernetesPassword)
+	deploymentController := KubernetesDeployment{
+		service:   clusterAutoscalerServiceName,
+		namespace: clusterAutoscalerServiceNamespace,
+	}
+	_, err := SetReplicasForDeployment(client, deploymentController, replicas)
+	return err
+}
+
+func disableClusterAutoscaler(*rollerState) {
+	verboseLog("Disabling the cluster autoscaler")
+	err := setReplicas(0)
+	if err == nil {
+		verboseLog("Successfully disabled the cluster autoscaler")
+		state.clusterAutoscaler.enabled = true
+	} else {
+		state.clusterAutoscaler.status = "failure"
+		errorMsg := fmt.Sprintf("Error: unable to manage the cluster-autoscaler deployment, will skip. Error was: %s", err)
+		state.clusterAutoscaler.err = errors.New(errorMsg)
+		fmt.Println(errorMsg)
+	}
+}
+
+func enableClusterAutoscaler(*rollerState) {
+	verboseLog("Enabling the cluster autoscaler")
+	err := setReplicas(1)
+	if err == nil {
+		verboseLog("Successfully enabled the cluster autoscaler")
+		state.clusterAutoscaler.enabled = true
+	} else {
+		state.clusterAutoscaler.status = "failure"
+		errorMsg := fmt.Sprintf("Error: unable to re-enable the cluster-autoscaler deployment. Error was: %s", err)
+		state.clusterAutoscaler.err = errors.New(errorMsg)
+		fmt.Println(errorMsg)
+	}
+}
+
 func init() {
+
 	if cluster == "" {
 		log.Fatal("Set the CLUSTER variable to the name of the target kubernetes cluster")
 	}
@@ -538,6 +596,16 @@ func init() {
 	} else {
 		kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsAccount, awsRegion, cluster)
 	}
+
+	if kubernetesUsername == "" {
+		log.Fatal("Set the KUBERNETES_USERNAME variable to desired kubernetes username")
+	}
+
+	if kubernetesPassword == "" {
+		log.Fatal("Set the KUBERNETES_PASSWORD variable to desired kubernetes password")
+	}
+
+	kubernetesEndpoint = fmt.Sprintf("https://%s-%s-kubernetes.vevo%s.com", awsRegion, cluster, awsAccount)
 }
 
 func main() {
@@ -549,8 +617,14 @@ func main() {
 		log.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
 	}
 
-	state = &rollerState{startTime: time.Now(),
-		inventory: inv}
+	state = &rollerState{
+		startTime: time.Now(),
+		inventory: inv,
+		clusterAutoscaler: clusterAutoscalerState{
+			enabled: false,
+			status:  "success",
+		},
+	}
 
 	// Are we going to roll all of etcd, k8s-master and k8s-node or just
 	// a subset.
@@ -560,12 +634,20 @@ func main() {
 		targetComponents = defaultComponents
 	}
 
-	state.SlackText = fmt.Sprintf("Starting a rolling update on cluster %s with the components %+v as the target components.\nAnsible version is set to %s\n", kubernetesCluster, targetComponents, ansibleVersion)
+	// Only manage the cluster autoscaler if rolling the k8s-node component.
+	// If managing it fails, continue but consider the overall state failed.
+	for _, component := range targetComponents {
+		if component == "k8s-node" {
+			disableClusterAutoscaler(state)
+		}
+	}
+
+	state.SlackText = fmt.Sprintf("Starting a rolling update on cluster %s with the components %+v as the target components.\nAnsible version is set to %s\nManagement of cluster autoscaler is set to %t", kubernetesCluster, targetComponents, ansibleVersion, state.clusterAutoscaler.enabled)
 
 	err = state.SlackPost()
 	verboseLog(fmt.Sprintf("Slack Post: %s", state.SlackText))
 	if err != nil {
-		fmt.Printf("An error occurred psting to slack.\nError %s\n", err)
+		fmt.Printf("An error occurred posting to slack.\nError %s\n", err)
 	}
 
 	var wg sync.WaitGroup
@@ -575,6 +657,10 @@ func main() {
 	}
 
 	wg.Wait()
+
+	if state.clusterAutoscaler.enabled {
+		enableClusterAutoscaler(state)
+	}
 
 	err = state.Summary()
 	if err != nil {
