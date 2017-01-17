@@ -589,7 +589,7 @@ func init() {
 		log.Fatal("Set the SLACK_WEBHOOK variable to desired webhook")
 	}
 
-	if awsAccount == "" {
+	if awsAccount != "" && awsProfile != "" {
 		// Force the use of ~/.aws/config when awsProfile is set
 		_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
 		kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsProfile, awsRegion, cluster)
