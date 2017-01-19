@@ -5,3 +5,4 @@ bin/godep
 pkg
 src
 vendor
+bin/glide

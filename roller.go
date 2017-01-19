@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/golang/glog"
 )
 
 var (
@@ -26,6 +27,7 @@ var (
 	awsRegion          = os.Getenv("AWS_REGION")
 	slackToken         = os.Getenv("SLACK_WEBHOOK")
 	rollerComponents   = os.Getenv("ROLLER_COMPONENTS")
+	rollerLogLevel     = os.Getenv("ROLLER_LOG_LEVEL")
 	ansibleVersion     = os.Getenv("ANSIBLE_VERSION")
 	kubernetesUsername = os.Getenv("KUBERNETES_USERNAME")
 	kubernetesPassword = os.Getenv("KUBERNETES_PASSWORD")
@@ -41,7 +43,6 @@ var (
 	}
 	clusterAutoscalerServiceName      = "cluster-autoscaler"
 	clusterAutoscalerServiceNamespace = "kube-system"
-	verboseLogging                    = "true"
 )
 
 type awsCloud interface {
@@ -81,12 +82,6 @@ type clusterAutoscalerState struct {
 
 func timeStamp() string {
 	return time.Now().Format(time.RFC822)
-}
-
-func verboseLog(l string) {
-	if verboseLogging != "" {
-		fmt.Println(l)
-	}
 }
 
 func newAWSCloudClient() *awsCloudClient {
@@ -334,7 +329,7 @@ func (c *awsCloudClient) terminateInstance(instance string) (*ec2.TerminateInsta
 	var resp *ec2.TerminateInstancesOutput
 	var err error
 
-	verboseLog(fmt.Sprintf("Terminating instance %s\n", instance))
+	glog.V(4).Infof("Terminating instance %s\n", instance)
 
 	params := &ec2.TerminateInstancesInput{
 		InstanceIds: []*string{
@@ -353,13 +348,13 @@ func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) 
 
 	// Loop until we have a new healthy replacemen or time has expired
 	for loop := 0; loop < 30; loop++ {
-		fmt.Printf("Checking for replacement %s instance - %s - loop %d\n", component, timeStamp(), loop)
+		glog.Infof("Checking for replacement %s instance - %s - loop %d\n", component, timeStamp(), loop)
 
 		params := &ec2.DescribeInstancesInput{}
 		params.Filters = []*ec2.Filter{newEC2Filter("tag:ServiceComponent", component)}
 		inv, err = c.DescribeInstances(params)
 		if err != nil {
-			log.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
+			glog.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
 		}
 
 		var instanceList []string
@@ -380,10 +375,10 @@ func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) 
 	}
 
 	if newInstance == "" {
-		fmt.Printf("Exiting find with an error for component %s.\n", component)
+		glog.Infof("Exiting find with an error for component %s.\n", component)
 		return newInstance, fmt.Errorf("Could not find a replacement %s instance.  Giving up!\n", component)
 	}
-	verboseLog(fmt.Sprintf("Exiting find without an error for component %s.\n", component))
+	glog.V(4).Infof("Exiting find without an error for component %s.\n", component)
 	return newInstance, err
 }
 
@@ -393,13 +388,13 @@ func (c *awsCloudClient) verifyReplacementInstance(component string, instance st
 
 	for loop := 0; loop < 30; loop++ {
 		status, err = c.getInstanceHealth(instance)
-		fmt.Printf("Component %s instance %s current status is %s - %s \n", component, instance, status, timeStamp())
+		glog.Infof("Component %s instance %s current status is %s - %s \n", component, instance, status, timeStamp())
 		if err != nil {
 			return err
 		}
 
 		if status == "True" {
-			fmt.Printf("Verification complete component %s instance %s is healthy\n", component, instance)
+			glog.Infof("Verification complete component %s instance %s is healthy\n", component, instance)
 			return err
 		}
 		time.Sleep(time.Second * 60)
@@ -446,7 +441,7 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, 
 
 		if len(e) != len(i) {
 			myComponent.err = fmt.Errorf("Etcd components are not healthy.  Please fix and run again")
-			verboseLog(fmt.Sprintf("%s", myComponent.err))
+			glog.V(4).Infof("%s", myComponent.err)
 			return myComponent.err
 		}
 	}
@@ -455,7 +450,7 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, 
 	for _, e := range myComponent.instances {
 		instanceList = append(instanceList, *e.InstanceId)
 	}
-	verboseLog(fmt.Sprintf("Component %s has starting instance Ids %v\n", component, instanceList))
+	glog.V(4).Infof("Component %s has starting instance Ids %v\n", component, instanceList)
 
 	// Pause autoscaling activities
 	for _, e := range myComponent.asgs {
@@ -473,27 +468,27 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, 
 		}
 	}
 
-	verboseLog(fmt.Sprintf("Starting instance termination verify loop for component %s", myComponent.name))
+	glog.V(4).Infof("Starting instance termination verify loop for component %s", myComponent.name)
 	for _, n := range myComponent.instances {
 		terminateTime := time.Now()
 		r, err := c.terminateInstance(*n.InstanceId)
 		if err != nil {
 			err = fmt.Errorf("An error occurred while terminating %s instance %s\n Error: %s\n Response: %s\n", myComponent.name, *n.InstanceId, err, r)
-			verboseLog(fmt.Sprintf("%s", err))
+			glog.V(4).Infof("%s", err)
 			return err
 		}
 
 		newInstance, err := c.findReplacementInstance(component, terminateTime)
 		if err != nil {
 			err = fmt.Errorf("An error occurred finding the replacement instance for component %s\n Error: %s\n", component, err)
-			verboseLog(fmt.Sprintf("%s", err))
+			glog.V(4).Infof("%s", err)
 			return err
 		}
 
 		err = c.verifyReplacementInstance(component, newInstance)
 		if err != nil {
 			err = fmt.Errorf("An error occurred verifying the health of instance %s\n Error: %s\n", newInstance, err)
-			verboseLog(fmt.Sprintf("%s", err))
+			glog.V(4).Infof("%s", err)
 			return err
 		}
 	}
@@ -501,7 +496,7 @@ func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, 
 	myComponent.status = true
 	myComponent.finish = time.Now()
 
-	verboseLog(fmt.Sprintf("Completed normal instance termination verify loop for component %s", myComponent.name))
+	glog.V(4).Infof("Completed normal instance termination verify loop for component %s", myComponent.name)
 	return nil
 }
 
@@ -540,10 +535,10 @@ func setReplicas(replicas int32) error {
 }
 
 func disableClusterAutoscaler(*rollerState) {
-	verboseLog("Disabling the cluster autoscaler")
+	glog.V(4).Info("Disabling the cluster autoscaler")
 	err := setReplicas(0)
 	if err == nil {
-		verboseLog("Successfully disabled the cluster autoscaler")
+		glog.V(4).Info("Successfully disabled the cluster autoscaler")
 		state.clusterAutoscaler.enabled = true
 	} else {
 		state.clusterAutoscaler.status = "failure"
@@ -554,10 +549,10 @@ func disableClusterAutoscaler(*rollerState) {
 }
 
 func enableClusterAutoscaler(*rollerState) {
-	verboseLog("Enabling the cluster autoscaler")
+	glog.V(4).Info("Enabling the cluster autoscaler")
 	err := setReplicas(1)
 	if err == nil {
-		verboseLog("Successfully enabled the cluster autoscaler")
+		glog.V(4).Info("Successfully enabled the cluster autoscaler")
 		state.clusterAutoscaler.enabled = true
 	} else {
 		state.clusterAutoscaler.status = "failure"
@@ -567,49 +562,58 @@ func enableClusterAutoscaler(*rollerState) {
 	}
 }
 
-func init() {
+func main() {
+	flag.Parse()
+	flag.Lookup("logtostderr").Value.Set("true")
+
 	_ = os.Setenv("AWS_SDK_LOAD_CONFIG", "true")
 
+	if rollerLogLevel != "" {
+		flag.Lookup("v").Value.Set(rollerLogLevel)
+	} else {
+		flag.Lookup("v").Value.Set("2")
+	}
+
+	glog.Info("Log level set to: ", flag.Lookup("v").Value)
+
 	if cluster == "" {
-		log.Fatal("Set the CLUSTER variable to the name of the target kubernetes cluster")
+		glog.Fatal("Set the CLUSTER variable to the name of the target kubernetes cluster")
 	}
 
 	if awsRegion == "" {
-		log.Fatal("Set the AWS_REGION variable to the name of the desired AWS region")
+		glog.Fatal("Set the AWS_REGION variable to the name of the desired AWS region")
 	}
 
 	if awsAccount == "" && awsProfile == "" {
-		log.Fatal("Set one of the variables AWS_ACCOUNT or AWS_PROFILE")
+		glog.Fatal("Set one of the variables AWS_ACCOUNT or AWS_PROFILE")
 	}
 
 	if ansibleVersion == "" {
-		log.Fatal("Set the ANSIBLE_VERSION variable to the desired ansible git sha")
+		glog.Fatal("Set the ANSIBLE_VERSION variable to the desired ansible git sha")
 	}
 
 	if slackToken == "" {
-		log.Fatal("Set the SLACK_WEBHOOK variable to desired webhook")
+		glog.Fatal("Set the SLACK_WEBHOOK variable to desired webhook")
 	}
 
 	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsAccount, awsRegion, cluster)
 
 	if kubernetesUsername == "" {
-		log.Fatal("Set the KUBERNETES_USERNAME variable to desired kubernetes username")
+		glog.Fatal("Set the KUBERNETES_USERNAME variable to desired kubernetes username")
 	}
 
 	if kubernetesPassword == "" {
-		log.Fatal("Set the KUBERNETES_PASSWORD variable to desired kubernetes password")
+		glog.Fatal("Set the KUBERNETES_PASSWORD variable to desired kubernetes password")
 	}
 
 	kubernetesEndpoint = fmt.Sprintf("https://%s-%s-kubernetes.vevo%s.com", awsRegion, cluster, awsAccount)
-}
 
-func main() {
 	cloud = newAWSCloudClient()
 	params := &ec2.DescribeInstancesInput{}
 	inv, err := cloud.DescribeInstances(params)
 
 	if err != nil {
-		log.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
+		glog.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
 	}
 
 	state = &rollerState{
@@ -640,9 +644,9 @@ func main() {
 	state.SlackText = fmt.Sprintf("Starting a rolling update on cluster %s with the components %+v as the target components.\nAnsible version is set to %s\nManagement of cluster autoscaler is set to %t", kubernetesCluster, targetComponents, ansibleVersion, state.clusterAutoscaler.enabled)
 
 	err = state.SlackPost()
-	verboseLog(fmt.Sprintf("Slack Post: %s", state.SlackText))
+	glog.V(4).Infof("Slack Post: %s", state.SlackText)
 	if err != nil {
-		fmt.Printf("An error occurred posting to slack.\nError %s\n", err)
+		glog.Errorf("An error occurred posting to slack.\nError %s\n", err)
 	}
 
 	var wg sync.WaitGroup
@@ -659,7 +663,7 @@ func main() {
 
 	err = state.Summary()
 	if err != nil {
-		fmt.Printf("An error occurred psting to slack.\nError %s\n", err)
+		glog.Errorf("An error occurred psting to slack.\nError %s\n", err)
 	}
-	verboseLog(fmt.Sprintf("Slack Post: %s", state.SlackText))
+	glog.V(4).Infof("Slack Post: %s", state.SlackText)
 }

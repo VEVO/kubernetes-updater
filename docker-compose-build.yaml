@@ -4,21 +4,21 @@ services:
   godep:
     image: golang:1.7
     volumes:
-      - ./:/go
-    command: ./bin/godep-restore.sh
-    working_dir: /go
+      - ./:/go/src/a/${BINARY_NAME}
+    command: ./bin/get-deps.sh
+    working_dir: /go/src/a/${BINARY_NAME}
   test:
     image: golang:1.7
     volumes:
-      - ./:/go
+      - ./:/go/src/a/${BINARY_NAME}
     command: ./bin/run-test-suite.sh
-    working_dir: /go
+    working_dir: /go/src/a/${BINARY_NAME}
   binary:
     image: golang:1.7
     volumes:
-      - ./:/go
-    command: ./bin/godep-build-binary.sh
-    working_dir: /go
+      - ./:/go/src/a/${BINARY_NAME}
+    command: ./bin/build-binary.sh
+    working_dir: /go/src/a/${BINARY_NAME}
     environment:
       CGO_ENABLED: 0
   release:
