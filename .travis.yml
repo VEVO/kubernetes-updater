@@ -1,11 +1,11 @@
 language: go
 sudo: false
 go: 1.7.4
-install: ./bin/godep-restore.sh
+install: ./bin/get-deps.sh
 script:
   - ./bin/run-test-suite.sh
 after_success:
-  - ./bin/godep-build-binary.sh
+  - ./bin/build-binary.sh
 deploy:
   skip_cleanup: true
   provider: releases
