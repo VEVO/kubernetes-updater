@@ -12,7 +12,7 @@ func TestGetReplicaCount(t *testing.T) {
 	deploymentObject, _ := deploymentController.GetDeployment(client)
 	replicas := *deploymentObject.Spec.Replicas
 	if replicas != int32(1) {
-		t.Error(fmt.Sprintf("expected 1, got %i", replicas))
+		t.Error(fmt.Sprintf("expected 1, got %d", replicas))
 	}
 }
 
@@ -46,7 +46,8 @@ func TestMissingService(t *testing.T) {
 	}
 	if err != nil {
 		if fmt.Sprintf("%s", err) != "deployments.extensions \"missing-service\" not found" {
-			t.Error(fmt.Sprintf("expected error \"deployments.extensions \"missing-service\" not found\", but got \"%s\"", err))
+			t.Error(fmt.Sprintf("expected error \"deployments.extensions \"missing-service\" not found\","+
+				"but got \"%s\"", err))
 		}
 	}
 }

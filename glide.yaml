@@ -263,3 +263,6 @@ import:
   - tools/clientcmd/api
   - tools/metrics
   - transport
+- package: k8s.io/apimachinery
+  subpackages:
+  - pkg/labels
