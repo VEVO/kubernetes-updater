@@ -6,3 +6,5 @@ pkg
 src
 vendor
 bin/glide
+.idea
+.glide
