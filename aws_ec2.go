@@ -47,9 +47,10 @@ func (c *AwsEc2Controller) DescribeInstances(ec2Client AwsEc2, request *ec2.Desc
 	// Instances are paged
 	results := []*ec2.Instance{}
 	var nextToken *string
+	var err error
 
 	// Set the request filters
-	_, err := c.setFilters(request.Filters)
+	request.Filters, err = c.updateFilters(request.Filters)
 	if err != nil {
 		glog.Fatalf("An error occurred describing the ec2 instances: %s", err)
 	}
@@ -182,15 +183,17 @@ func (c *AwsEc2Controller) GetUniqueTagValues(tagName string, instances []*ec2.I
 	return results, nil
 }
 
-func (c *AwsEc2Controller) setFilters(filters []*ec2.Filter) ([]*ec2.Filter, error) {
-	c.filters = filters
+func (c *AwsEc2Controller) updateFilters(filters []*ec2.Filter) ([]*ec2.Filter, error) {
+	for _, f := range filters {
+		c.filters = append(c.filters, f)
+	}
 
-	if len(filters) == 0 {
+	if len(c.filters) == 0 {
 		// We can't pass a zero-length Filters to AWS (it's an error)
 		// So if we end up with no filters; return an error
 		return filters, fmt.Errorf("Cannot pass zero-length filters to aws: %s", filters)
 	}
-	return filters, nil
+	return c.filters, nil
 }
 
 func (c *AwsEc2Controller) newEC2Filter(name string, value string) *ec2.Filter {
