@@ -9,6 +9,7 @@ import (
 type AwsAutoscaling interface {
 	SuspendProcesses(*autoscaling.ScalingProcessQuery) (string, error)
 	ResumeProcesses(*autoscaling.ScalingProcessQuery) (string, error)
+	SetDesiredCount(*autoscaling.SetDesiredCapacityInput) (string, error)
 }
 
 type AwsAutoscalingClient struct {
@@ -36,6 +37,12 @@ func (autoScalingClient *AwsAutoscalingClient) ResumeProcesses(params *autoscali
 	return response.String(), err
 }
 
+func (autoScalingClient *AwsAutoscalingClient) SetDesiredCount(desiredCapacity *autoscaling.SetDesiredCapacityInput) (string, error) {
+	var response *autoscaling.SetDesiredCapacityOutput
+	response, err := autoScalingClient.session.SetDesiredCapacity(desiredCapacity)
+	return response.String(), err
+}
+
 func (c *AwsAutoscalingController) manageASGProcesses(autoscalingClient AwsAutoscaling, asg string, scalingProcesses []*string, action string) (string, error) {
 	var err error
 	var response string
@@ -52,4 +59,12 @@ func (c *AwsAutoscalingController) manageASGProcesses(autoscalingClient AwsAutos
 	}
 
 	return response, err
+}
+
+func (c *AwsAutoscalingController) setDesiredCount(autoscalingClient AwsAutoscaling, asg string, desiredCapacity int64) (string, error) {
+	scalingProcessQuery := &autoscaling.SetDesiredCapacityInput{
+		AutoScalingGroupName: &asg,
+		DesiredCapacity:      &desiredCapacity,
+	}
+	return autoscalingClient.SetDesiredCount(scalingProcessQuery)
 }
