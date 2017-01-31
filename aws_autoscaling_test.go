@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
 )
 
@@ -23,7 +24,10 @@ func (autoScalingClient *FakeAwsAutoscalingClient) ResumeProcesses(params *autos
 func TestAwsManageASGProcesesSuspend(t *testing.T) {
 	awsAutoscalingclient := newFakeAWSAutoscalingClient()
 	awsAutoscalingController := &AwsAutoscalingController{}
-	_, err := awsAutoscalingController.awsManageASGProcesses(awsAutoscalingclient, "infra-k8s-worker", "suspend")
+	scalingProcesses := []*string{
+		aws.String("AZRebalance"),
+	}
+	_, err := awsAutoscalingController.manageASGProcesses(awsAutoscalingclient, "infra-k8s-worker", scalingProcesses, "suspend")
 	if err != nil {
 		t.Error("got error when attempting to suspend an ASG")
 	}
@@ -32,7 +36,10 @@ func TestAwsManageASGProcesesSuspend(t *testing.T) {
 func TestAwsManageASGProcesesResume(t *testing.T) {
 	awsAutoscalingclient := newFakeAWSAutoscalingClient()
 	awsAutoscalingController := &AwsAutoscalingController{}
-	_, err := awsAutoscalingController.awsManageASGProcesses(awsAutoscalingclient, "infra-k8s-worker", "resume")
+	scalingProcesses := []*string{
+		aws.String("AZRebalance"),
+	}
+	_, err := awsAutoscalingController.manageASGProcesses(awsAutoscalingclient, "infra-k8s-worker", scalingProcesses, "resume")
 	if err != nil {
 		t.Error("got error when attempting to suspend an ASG")
 	}

@@ -36,15 +36,13 @@ func (autoScalingClient *AwsAutoscalingClient) ResumeProcesses(params *autoscali
 	return response.String(), err
 }
 
-func (c *AwsAutoscalingController) awsManageASGProcesses(autoscalingClient AwsAutoscaling, asg string, action string) (string, error) {
+func (c *AwsAutoscalingController) manageASGProcesses(autoscalingClient AwsAutoscaling, asg string, scalingProcesses []*string, action string) (string, error) {
 	var err error
 	var response string
 
 	params := &autoscaling.ScalingProcessQuery{
 		AutoScalingGroupName: aws.String(asg),
-		ScalingProcesses: []*string{
-			aws.String("AZRebalance"),
-		},
+		ScalingProcesses:     scalingProcesses,
 	}
 
 	if action == "suspend" {

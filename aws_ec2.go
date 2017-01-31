@@ -335,8 +335,12 @@ func (c *AwsEc2Controller) terminateAndVerifyComponentInstances(ec2Client AwsEc2
 
 	// Pause autoscaling activities
 	awsAutoscalingController := AwsAutoscalingController{}
+	scalingProcesses := []*string{
+		aws.String("AZRebalance"),
+		aws.String("Terminate"),
+	}
 	for _, e := range myComponent.asgs {
-		_, err = awsAutoscalingController.awsManageASGProcesses(awsAutoscaling, e, "suspend")
+		_, err = awsAutoscalingController.manageASGProcesses(awsAutoscaling, e, scalingProcesses, "suspend")
 		if err != nil {
 			return fmt.Errorf("An error occurred while suspending processes on %s\n Error: %s\n", e, err)
 		}
@@ -344,7 +348,7 @@ func (c *AwsEc2Controller) terminateAndVerifyComponentInstances(ec2Client AwsEc2
 
 	// Defer resume autoscaling activities
 	for _, e := range myComponent.asgs {
-		defer awsAutoscalingController.awsManageASGProcesses(awsAutoscaling, e, "resume")
+		defer awsAutoscalingController.manageASGProcesses(awsAutoscaling, e, scalingProcesses, "resume")
 
 		if err != nil {
 			return fmt.Errorf("An error occurred while resuming processes on %s\n Error: %s\n", e, err)
