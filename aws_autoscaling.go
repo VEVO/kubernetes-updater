@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/autoscaling"
@@ -10,6 +12,7 @@ type AwsAutoscaling interface {
 	SuspendProcesses(*autoscaling.ScalingProcessQuery) (string, error)
 	ResumeProcesses(*autoscaling.ScalingProcessQuery) (string, error)
 	SetDesiredCount(*autoscaling.SetDesiredCapacityInput) (string, error)
+	GetDesiredCount(*autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error)
 }
 
 type AwsAutoscalingClient struct {
@@ -43,6 +46,10 @@ func (autoScalingClient *AwsAutoscalingClient) SetDesiredCount(desiredCapacity *
 	return response.String(), err
 }
 
+func (autoScalingClient *AwsAutoscalingClient) GetDesiredCount(autoscalingGroupInput *autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
+	return autoScalingClient.session.DescribeAutoScalingGroups(autoscalingGroupInput)
+}
+
 func (c *AwsAutoscalingController) manageASGProcesses(autoscalingClient AwsAutoscaling, asg string, scalingProcesses []*string, action string) (string, error) {
 	var err error
 	var response string
@@ -67,4 +74,23 @@ func (c *AwsAutoscalingController) setDesiredCount(autoscalingClient AwsAutoscal
 		DesiredCapacity:      &desiredCapacity,
 	}
 	return autoscalingClient.SetDesiredCount(scalingProcessQuery)
+}
+
+func (c *AwsAutoscalingController) getDesiredCount(autoscalingClient AwsAutoscaling, asg string) (int64, error) {
+	autoscalingGroupInput := &autoscaling.DescribeAutoScalingGroupsInput{
+		AutoScalingGroupNames: []*string{
+			&asg,
+		},
+	}
+	autoscalingGroupOutput, err := autoscalingClient.GetDesiredCount(autoscalingGroupInput)
+	if err != nil {
+		return -1, err
+	}
+	for _, autoscalingGroup := range autoscalingGroupOutput.AutoScalingGroups {
+		if *autoscalingGroup.AutoScalingGroupName == asg {
+			desiredCapacity := *autoscalingGroup.DesiredCapacity
+			return desiredCapacity, nil
+		}
+	}
+	return -1, fmt.Errorf("Could not find desired count for ASG %s", asg)
 }

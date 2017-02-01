@@ -7,6 +7,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/autoscaling"
 )
 
+var fakeDescribeAutoScalingGroupsOutput = &autoscaling.DescribeAutoScalingGroupsOutput{}
+
 type FakeAwsAutoscalingClient struct{}
 
 func newFakeAWSAutoscalingClient() AwsAutoscaling {
@@ -23,6 +25,10 @@ func (autoScalingClient *FakeAwsAutoscalingClient) ResumeProcesses(params *autos
 
 func (autoScalingClient *FakeAwsAutoscalingClient) SetDesiredCount(input *autoscaling.SetDesiredCapacityInput) (string, error) {
 	return "{}", nil
+}
+
+func (autoScalingClient *FakeAwsAutoscalingClient) GetDesiredCount(autoscalingInstanceInput *autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
+	return fakeDescribeAutoScalingGroupsOutput, nil
 }
 
 func TestAwsManageASGProcesesSuspend(t *testing.T) {
@@ -55,5 +61,29 @@ func TestAwsSetDesiredCount(t *testing.T) {
 	_, err := awsAutoscalingController.setDesiredCount(awsAutoscalingclient, "infra-k8s-worker", 4)
 	if err != nil {
 		t.Error("got error when attempting to set disired capacity for an ASG")
+	}
+}
+
+func TestAwsGetDesiredCount(t *testing.T) {
+	awsAutoscalingclient := newFakeAWSAutoscalingClient()
+	awsAutoscalingController := &AwsAutoscalingController{}
+	asgName := "infra-k8s-worker"
+	asgCount := int64(3)
+	fakeAutoscalingGroup := autoscaling.Group{
+		AutoScalingGroupName: &asgName,
+		DesiredCapacity:      &asgCount,
+	}
+	fakeAutoscalingGroupPointer := &fakeAutoscalingGroup
+	fakeDescribeAutoScalingGroupsOutput = &autoscaling.DescribeAutoScalingGroupsOutput{
+		AutoScalingGroups: []*autoscaling.Group{
+			fakeAutoscalingGroupPointer,
+		},
+	}
+	count, err := awsAutoscalingController.getDesiredCount(awsAutoscalingclient, asgName)
+	if err != nil {
+		t.Errorf("got error when attempting to get disired capacity for an ASG: %s", err)
+	}
+	if count != 3 {
+		t.Errorf("got wrong count when attempting to get disired capacity for an ASG: expected 3, got %d")
 	}
 }
