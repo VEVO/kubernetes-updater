@@ -143,6 +143,7 @@ func (s *rollerState) Summary() error {
 }
 
 func setReplicas(replicas int32) error {
+	glog.V(4).Info("Setting replicas to %d for deployment %s", replicas, clusterAutoscalerServiceName)
 	client := NewClient(kubernetesEndpoint, kubernetesUsername, kubernetesPassword)
 	deploymentController := KubernetesDeployment{
 		service:   clusterAutoscalerServiceName,
@@ -298,6 +299,8 @@ func cordonKubernetesNodes(kubernetesClient KubernetesClient, instanceList []str
 // replaceInstancesVerifyAndTerminate() in that it terminates the instances before verifying replacements.
 // Useful for small ASGs or when there is an upper limit to the number of instances you can have in the an ASG.
 func replaceInstancesTerminateAndVerify(awsClient *AwsClient, component string, ansibleVersion string, wg *sync.WaitGroup) error {
+	glog.V(4).Info("Starting process to terminate and replace instances for %s", component)
+
 	defer wg.Done()
 
 	// The number of instances to terminate and replace at a time
@@ -353,6 +356,8 @@ func replaceInstancesTerminateAndVerify(awsClient *AwsClient, component string, 
 // replaceInstancesTerminateAndVerify() in that it verifies replacements before terminating the old instances.
 // Useful for large ASGs when there is no upper limit to the number of instances you can have in the ASG.
 func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, ansibleVersion string, wg *sync.WaitGroup) error {
+	glog.V(4).Info("Starting process to start new instances and terminate existing for %s", component)
+
 	defer wg.Done()
 
 	scalingProcesses := []*string{
@@ -376,6 +381,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 	for _, asg := range myComponent.asgs {
 		count, err := awsClient.autoscaling.getDesiredCount(asg)
 		desiredCount = int(count)
+		glog.V(4).Info("Starting desired count for ASG %s is %d", asg, desiredCount)
 		if err != nil {
 			err = fmt.Errorf("Got error when trying to get the desired count for ASG %s: %s. ", asg, err)
 			glog.V(4).Infof("%s", err)
@@ -392,6 +398,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 	temporaryDesiredCount := int64(desiredCount * 2)
 	creationTime := time.Now()
 	for _, asg := range myComponent.asgs {
+		glog.V(4).Info("Setting desired count for ASG %s to %d", asg, temporaryDesiredCount)
 		_, err = awsClient.autoscaling.setDesiredCount(asg, temporaryDesiredCount)
 		if err != nil {
 			err = fmt.Errorf("Got error when trying to set the desired count for ASG %s: %s. ", asg, err)
@@ -442,6 +449,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 
 	// Set desired count back to what it was originally
 	for _, asg := range myComponent.asgs {
+		glog.V(4).Info("Setting desired count for ASG %s to %d", asg, desiredCount)
 		_, err = awsClient.autoscaling.setDesiredCount(asg, int64(desiredCount))
 		if err != nil {
 			err = fmt.Errorf("Got error when trying to set the desired count for ASG %s: %s. ", asg, err)
