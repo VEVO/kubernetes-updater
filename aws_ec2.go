@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -79,6 +78,7 @@ func (c *AwsEc2Controller) DescribeInstances(ec2Client AwsEc2, request *ec2.Desc
 
 	return results, err
 }
+
 func (c *AwsEc2Controller) DescribeInstancesNotMatchingAnsibleVersion(ec2Client AwsEc2, request *ec2.DescribeInstancesInput, ansibleVersion string) ([]*ec2.Instance, error) {
 	results, err := c.DescribeInstances(ec2Client, request)
 	if err != nil {
@@ -222,17 +222,20 @@ func (c *AwsEc2Controller) terminateInstance(ec2Client AwsEc2, instance string) 
 	return resp, err
 }
 
-func (c *AwsEc2Controller) findReplacementInstance(ec2Client AwsEc2, component string, ansibleVersion string, t time.Time) (string, error) {
-	var newInstance string
+func (c *AwsEc2Controller) findReplacementInstances(ec2Client AwsEc2, component string, ansibleVersion string, count int, t time.Time) ([]string, error) {
+	var replacementInstances []string
 	var err error
-	var inv []*ec2.Instance
 
-	// Loop until we have a new healthy replacement or time has expired
+	// Loop until we have new healthy replacements or time has expired
 	for loop := 0; loop < 30; loop++ {
-		glog.Infof("Checking for replacement %s instance - %s - loop %d\n", component, timeStamp(), loop)
+		glog.Infof("Checking for replacement %d %s instances - %s - loop %d\n", count, component, timeStamp(), loop)
+
+		var newInstances []string
+		var inv []*ec2.Instance
 
 		params := &ec2.DescribeInstancesInput{}
 		params.Filters = []*ec2.Filter{c.newEC2Filter("tag:ServiceComponent", component)}
+
 		inv, err = c.DescribeInstancesNotMatchingAnsibleVersion(ec2Client, params, ansibleVersion)
 		if err != nil {
 			glog.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
@@ -245,144 +248,50 @@ func (c *AwsEc2Controller) findReplacementInstance(ec2Client AwsEc2, component s
 
 		for _, e := range inv {
 			if e.LaunchTime.After(t) {
-				newInstance = *e.InstanceId
+				newInstances = append(newInstances, *e.InstanceId)
 			}
 		}
 
-		if newInstance != "" {
+		if len(newInstances) == count {
+			replacementInstances = newInstances
 			break
 		}
+
 		time.Sleep(time.Second * 30)
 	}
 
-	if newInstance == "" {
+	if len(replacementInstances) < count {
 		glog.Infof("Exiting find with an error for component %s.\n", component)
-		return newInstance, fmt.Errorf("Could not find a replacement %s instance.  Giving up!\n", component)
+		return replacementInstances, fmt.Errorf("Found %d/%d replacement %s instances. Giving up!\n",
+			len(replacementInstances), component)
 	}
+
 	glog.V(4).Infof("Exiting find without an error for component %s.\n", component)
-	return newInstance, err
+	return replacementInstances, err
 }
 
-func (c *AwsEc2Controller) verifyReplacementInstance(ec2Client AwsEc2, component string, instance string) error {
+func (c *AwsEc2Controller) verifyReplacementInstances(ec2Client AwsEc2, component string, instances []string) error {
 	var err error
 	var status string
+	var validInstanceCount int
 
 	for loop := 0; loop < 30; loop++ {
-		status, err = c.getInstanceHealth(ec2Client, instance)
-		glog.Infof("Component %s instance %s current status is %s - %s \n", component, instance, status, timeStamp())
-		if err != nil {
-			return err
+		for _, instance := range instances {
+			status, err = c.getInstanceHealth(ec2Client, instance)
+			glog.Infof("Component %s instance %s current status is %s - %s \n", component, instance, status, timeStamp())
+			if err != nil {
+				return err
+			}
+			if status == "True" {
+				glog.Infof("Verification complete component %s instance %s is healthy\n", component, instance)
+				validInstanceCount++
+				continue
+			}
+			time.Sleep(time.Second * 60)
 		}
-
-		if status == "True" {
-			glog.Infof("Verification complete component %s instance %s is healthy\n", component, instance)
-			return err
-		}
-		time.Sleep(time.Second * 60)
-	}
-	return fmt.Errorf("Timed out waiting for component %s instance %s to be healthy", component, instance)
-}
-
-func (c *AwsEc2Controller) terminateAndVerifyComponentInstances(ec2Client AwsEc2, awsAutoscaling AwsAutoscaling, component string, ansibleVersion string, wg *sync.WaitGroup) error {
-	defer wg.Done()
-	// Get list of instances by filter on tag ServiceComponent == component
-	//	params.Filters = append(params.Filters, newEC2Filter("tag:ServiceComponent", "k8s-master"))
-	i, err := c.InstancesMatchingTagValue("ServiceComponent", component, state.inventory)
-	if err != nil {
-		return err
-	}
-
-	a, err := c.GetUniqueTagValues("aws:autoscaling:groupName", i)
-	if err != nil {
-		return err
-	}
-
-	myComponent := &componentType{
-		name:      component,
-		start:     time.Now(),
-		instances: i,
-		asgs:      a}
-
-	state.components = append(state.components, myComponent)
-
-	if component == "etcd" {
-		var e []*ec2.Instance
-		e, err = c.InstancesMatchingTagValue("healthy", "True", myComponent.instances)
-		if err != nil {
-			return err
-		}
-		var ee []*string
-		var ii []*string
-		for _, r := range e {
-			ee = append(ee, r.InstanceId)
-		}
-		for _, q := range e {
-			ii = append(ii, q.InstanceId)
-		}
-
-		if len(e) != len(i) {
-			myComponent.err = fmt.Errorf("Etcd components are not healthy.  Please fix and run again")
-			glog.V(4).Infof("%s", myComponent.err)
-			return myComponent.err
-		}
-	}
-
-	var instanceList []string
-	for _, e := range myComponent.instances {
-		instanceList = append(instanceList, *e.InstanceId)
-	}
-	glog.V(4).Infof("Component %s has starting instance Ids %v\n", component, instanceList)
-
-	// Pause autoscaling activities
-	awsAutoscalingController := AwsAutoscalingController{}
-	scalingProcesses := []*string{
-		aws.String("AZRebalance"),
-		aws.String("Terminate"),
-	}
-	for _, e := range myComponent.asgs {
-		_, err = awsAutoscalingController.manageASGProcesses(awsAutoscaling, e, scalingProcesses, "suspend")
-		if err != nil {
-			return fmt.Errorf("An error occurred while suspending processes on %s\n Error: %s\n", e, err)
-		}
-	}
-
-	// Defer resume autoscaling activities
-	for _, e := range myComponent.asgs {
-		defer awsAutoscalingController.manageASGProcesses(awsAutoscaling, e, scalingProcesses, "resume")
-
-		if err != nil {
-			return fmt.Errorf("An error occurred while resuming processes on %s\n Error: %s\n", e, err)
-		}
-	}
-
-	glog.V(4).Infof("Starting instance termination verify loop for component %s", myComponent.name)
-	for _, n := range myComponent.instances {
-		terminateTime := time.Now()
-		r, err := c.terminateInstance(ec2Client, *n.InstanceId)
-		if err != nil {
-			err = fmt.Errorf("An error occurred while terminating %s instance %s\n Error: %s\n Response: %s\n", myComponent.name, *n.InstanceId, err, r)
-			glog.V(4).Infof("%s", err)
-			return err
-		}
-
-		newInstance, err := c.findReplacementInstance(ec2Client, component, ansibleVersion, terminateTime)
-		if err != nil {
-			err = fmt.Errorf("An error occurred finding the replacement instance for component %s\n Error: %s\n", component, err)
-			glog.V(4).Infof("%s", err)
-			return err
-		}
-
-		err = c.verifyReplacementInstance(ec2Client, component, newInstance)
-		if err != nil {
-			err = fmt.Errorf("An error occurred verifying the health of instance %s\n Error: %s\n", newInstance, err)
-			glog.V(4).Infof("%s", err)
+		if validInstanceCount == len(instances) {
 			return err
 		}
 	}
-
-	myComponent.status = true
-	myComponent.finish = time.Now()
-
-	glog.V(4).Infof("Completed normal instance termination verify loop for component %s", myComponent.name)
-	return nil
+	return fmt.Errorf("Timed out waiting for component %s, instances %s", component, instances)
 }
