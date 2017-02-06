@@ -248,20 +248,17 @@ func replaceInstancesPrepare(awsClient *AwsClient, component string, scalingProc
 		}
 	}
 
-	// Defer resume autoscaling activities
-	for _, asg := range myComponent.asgs {
-		defer resumeASGProcesses(awsClient, asg, scalingProcesses, myComponent)
-	}
-
 	return myComponent, instanceList, nil
 }
 
-func resumeASGProcesses(awsClient *AwsClient, asg string, scalingProcesses []*string, component *componentType) {
-	glog.V(4).Infof("Resuming autoscaling processes for %s\n", asg)
-	_, err := awsClient.autoscaling.manageASGProcesses(asg, scalingProcesses, "resume")
-	if err != nil {
-		glog.Errorf("An error occurred while resuming processes on %s\n Error: %s\n", asg, err)
-		component.status = false
+func resumeASGProcesses(awsClient *AwsClient, scalingProcesses []*string, component *componentType) {
+	for _, asg := range component.asgs {
+		glog.V(4).Infof("Resuming autoscaling processes for %s\n", asg)
+		_, err := awsClient.autoscaling.manageASGProcesses(asg, scalingProcesses, "resume")
+		if err != nil {
+			glog.Errorf("An error occurred while resuming processes on %s\n Error: %s\n", asg, err)
+			component.status = false
+		}
 	}
 }
 
@@ -317,6 +314,9 @@ func replaceInstancesTerminateAndVerify(awsClient *AwsClient, component string, 
 		return err
 	}
 
+	// Defer resume autoscaling activities
+	defer resumeASGProcesses(awsClient, scalingProcesses, myComponent)
+
 	glog.V(4).Infof("Starting instance termination verify loop for component %s", myComponent.name)
 	for _, n := range myComponent.instances {
 		terminateTime := time.Now()
@@ -352,7 +352,7 @@ func replaceInstancesTerminateAndVerify(awsClient *AwsClient, component string, 
 // Spins up new replacement instances, verifies them, and then terminates the old instances. Differs from
 // replaceInstancesTerminateAndVerify() in that it verifies replacements before terminating the old instances.
 // Useful for large ASGs when there is no upper limit to the number of instances you can have in the ASG.
-func (c *AwsEc2Controller) replaceInstancesVerifyAndTerminate(awsClient *AwsClient, awsAutoscaling AwsAutoscaling, component string, ansibleVersion string, wg *sync.WaitGroup) error {
+func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, ansibleVersion string, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	scalingProcesses := []*string{
@@ -366,6 +366,9 @@ func (c *AwsEc2Controller) replaceInstancesVerifyAndTerminate(awsClient *AwsClie
 		glog.V(4).Infof("%s", err)
 		return err
 	}
+
+	// Defer resume autoscaling activities
+	defer resumeASGProcesses(awsClient, scalingProcesses, myComponent)
 
 	var desiredCount int
 
@@ -544,7 +547,12 @@ func main() {
 	var wg sync.WaitGroup
 	for _, component := range targetComponents {
 		wg.Add(1)
-		go replaceInstancesTerminateAndVerify(awsClient, component, ansibleVersion, &wg)
+		// Batch replace k8s-worker nodes and replace one at a time for k8s-master and etcd components
+		if component == "k8s-worker" {
+			go replaceInstancesVerifyAndTerminate(awsClient, component, ansibleVersion, &wg)
+		} else {
+			go replaceInstancesTerminateAndVerify(awsClient, component, ansibleVersion, &wg)
+		}
 	}
 
 	wg.Wait()

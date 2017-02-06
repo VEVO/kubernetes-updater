@@ -20,7 +20,7 @@ AWS_REGION=us-east-1
 Verbose logging can be enabled via
 
 ```
-ROLLER_VERBOSE_MODE=true
+ROLLER_LOG_LEVEL=4
 ```
 
 Additionally you can control which of the components (etcd, k8s-master and k8s-node) you want to roll.   This example would only roll the k8s-master and k8s-node components.
@@ -38,5 +38,3 @@ CLUSTER=infra stringer roll_cluster
 ```
 CLUSTER=infra ROLLER_COMPONENTS=etcd stringer roll_cluster
 ```
-
-
