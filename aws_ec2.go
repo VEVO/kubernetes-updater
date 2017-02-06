@@ -280,25 +280,36 @@ func (c *AwsEc2Controller) findReplacementInstances(component string, ansibleVer
 func (c *AwsEc2Controller) verifyReplacementInstances(component string, instances []string) error {
 	var err error
 	var status string
-	var validInstanceCount int
 
 	for loop := 0; loop < 30; loop++ {
-		for _, instance := range instances {
+		for i := len(instances) - 1; i >= 0; i-- {
+			instance := instances[i]
 			status, err = c.getInstanceHealth(instance)
-			glog.Infof("Component %s instance %s current status is %s - %s \n", component, instance, status, timeStamp())
 			if err != nil {
 				return err
 			}
+			glog.Infof("Component %s instance %s current status is %s - %s \n", component, instance, status, timeStamp())
 			if status == "True" {
 				glog.Infof("Verification complete component %s instance %s is healthy\n", component, instance)
-				validInstanceCount++
+				// Remove instance from the slice so we don't check again
+				instances = append(instances[:i], instances[i+1:]...)
 				continue
 			}
-			time.Sleep(time.Second * 60)
 		}
-		if validInstanceCount == len(instances) {
-			return err
+
+		// If any instances are not yet healthy, keep checking
+		if len(instances) > 0 {
+			glog.Infof("Still waiting for the following %s instances to become healthy %s\n", component, instances)
+			time.Sleep(time.Second * 5)
+			continue
 		}
+		break
 	}
-	return fmt.Errorf("Timed out waiting for component %s, instances %s", component, instances)
+
+	if len(instances) > 0 {
+		return fmt.Errorf("Failed to verify %s instances %s", component, instances)
+	}
+
+	glog.Infof("Verification complete component %s all instances are healthy\n", component)
+	return nil
 }
