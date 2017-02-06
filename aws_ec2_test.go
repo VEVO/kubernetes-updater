@@ -49,13 +49,12 @@ func (e FakeAwsEc2Client) TerminateInstances(input *ec2.TerminateInstancesInput)
 }
 
 func TestAwsEc2Client_DescribeInstances(t *testing.T) {
-	ec2Client := newFakeAWSEc2Client()
-	ec2Controller := AwsEc2Controller{}
+	ec2Controller := newAWSEc2Controller(newFakeAWSEc2Client())
 	params := &ec2.DescribeInstancesInput{}
 	params.Filters = []*ec2.Filter{
 		ec2Controller.newEC2Filter("instance-state-name", "running"),
 	}
-	instancesOutput, _ := ec2Controller.DescribeInstances(ec2Client, params)
+	instancesOutput, _ := ec2Controller.DescribeInstances(params)
 
 	if len(instancesOutput) < 1 {
 		t.Error("Could not describe instances")

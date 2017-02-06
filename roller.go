@@ -188,13 +188,13 @@ func addComponentToState(awsClient *AwsClient, component string, state *rollerSt
 
 	// Get list of instances by filter on tag ServiceComponent == component
 	//	params.Filters = append(params.Filters, newEC2Filter("tag:ServiceComponent", "k8s-master"))
-	instances, err := awsClient.ec2.controller.InstancesMatchingTagValue("ServiceComponent", component, state.inventory)
+	instances, err := awsClient.ec2.InstancesMatchingTagValue("ServiceComponent", component, state.inventory)
 	if err != nil {
 		return myComponent, err
 	}
 	myComponent.instances = instances
 
-	asgs, err := awsClient.ec2.controller.GetUniqueTagValues("aws:autoscaling:groupName", instances)
+	asgs, err := awsClient.ec2.GetUniqueTagValues("aws:autoscaling:groupName", instances)
 	if err != nil {
 		return myComponent, err
 	}
@@ -205,7 +205,7 @@ func addComponentToState(awsClient *AwsClient, component string, state *rollerSt
 }
 
 func validateEtcdInstances(awsClient *AwsClient, component *componentType) error {
-	instances, err := awsClient.ec2.controller.InstancesMatchingTagValue("healthy", "True", component.instances)
+	instances, err := awsClient.ec2.InstancesMatchingTagValue("healthy", "True", component.instances)
 	if err != nil {
 		return err
 	}
@@ -242,7 +242,7 @@ func replaceInstancesPrepare(awsClient *AwsClient, component string, scalingProc
 
 	for _, asg := range myComponent.asgs {
 		glog.V(4).Infof("Suspending autoscaling processes for %s\n", asg)
-		_, err := awsClient.autoscaling.controller.manageASGProcesses(awsClient.autoscaling.client, asg, scalingProcesses, "suspend")
+		_, err := awsClient.autoscaling.manageASGProcesses(asg, scalingProcesses, "suspend")
 		if err != nil {
 			return myComponent, instanceList, fmt.Errorf("An error occurred while suspending processes on %s\n Error: %s\n", asg, err)
 		}
@@ -258,7 +258,7 @@ func replaceInstancesPrepare(awsClient *AwsClient, component string, scalingProc
 
 func resumeASGProcesses(awsClient *AwsClient, asg string, scalingProcesses []*string, component *componentType) {
 	glog.V(4).Infof("Resuming autoscaling processes for %s\n", asg)
-	_, err := awsClient.autoscaling.controller.manageASGProcesses(awsClient.autoscaling.client, asg, scalingProcesses, "resume")
+	_, err := awsClient.autoscaling.manageASGProcesses(asg, scalingProcesses, "resume")
 	if err != nil {
 		glog.Errorf("An error occurred while resuming processes on %s\n Error: %s\n", asg, err)
 		component.status = false
@@ -300,7 +300,7 @@ func cordonKubernetesNodes(kubernetesClient KubernetesClient, instanceList []str
 // Terminates and checks one or more instances at a time, in a "rolling" fashion. Differs from
 // replaceInstancesVerifyAndTerminate() in that it terminates the instances before verifying replacements.
 // Useful for small ASGs or when there is an upper limit to the number of instances you can have in the an ASG.
-func replaceInstancesTerminateAndVerify(state *rollerState, awsClient *AwsClient, component string, ansibleVersion string, wg *sync.WaitGroup) error {
+func replaceInstancesTerminateAndVerify(awsClient *AwsClient, component string, ansibleVersion string, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	// The number of instances to terminate and replace at a time
@@ -320,21 +320,21 @@ func replaceInstancesTerminateAndVerify(state *rollerState, awsClient *AwsClient
 	glog.V(4).Infof("Starting instance termination verify loop for component %s", myComponent.name)
 	for _, n := range myComponent.instances {
 		terminateTime := time.Now()
-		r, err := awsClient.ec2.controller.terminateInstance(awsClient.ec2.client, *n.InstanceId)
+		r, err := awsClient.ec2.terminateInstance(*n.InstanceId)
 		if err != nil {
 			err = fmt.Errorf("An error occurred while terminating %s instance %s\n Error: %s\n Response: %s\n", myComponent.name, *n.InstanceId, err, r)
 			glog.V(4).Infof("%s", err)
 			return err
 		}
 
-		newInstances, err := awsClient.ec2.controller.findReplacementInstances(awsClient.ec2.client, component, ansibleVersion, newInstanceRollingCount, terminateTime)
+		newInstances, err := awsClient.ec2.findReplacementInstances(component, ansibleVersion, newInstanceRollingCount, terminateTime)
 		if err != nil {
 			err = fmt.Errorf("An error occurred finding the replacement instances for component %s\n Error: %s\n", component, err)
 			glog.V(4).Infof("%s", err)
 			return err
 		}
 
-		err = awsClient.ec2.controller.verifyReplacementInstances(awsClient.ec2.client, component, newInstances)
+		err = awsClient.ec2.verifyReplacementInstances(component, newInstances)
 		if err != nil {
 			err = fmt.Errorf("An error occurred verifying the health of instances %s\n Error: %s\n", newInstances, err)
 			glog.V(4).Infof("%s", err)
@@ -371,7 +371,7 @@ func (c *AwsEc2Controller) replaceInstancesVerifyAndTerminate(awsClient *AwsClie
 
 	// Ensure the total current instance count is the same as the desired count of the ASG
 	for _, asg := range myComponent.asgs {
-		count, err := awsClient.autoscaling.controller.getDesiredCount(awsClient.autoscaling.client, asg)
+		count, err := awsClient.autoscaling.getDesiredCount(asg)
 		desiredCount = int(count)
 		if err != nil {
 			err = fmt.Errorf("Got error when trying to get the desired count for ASG %s: %s. ", asg, err)
@@ -379,7 +379,7 @@ func (c *AwsEc2Controller) replaceInstancesVerifyAndTerminate(awsClient *AwsClie
 			return err
 		}
 		if len(instanceList) != desiredCount {
-			err := fmt.Errorf("The desired count (%d) in the ASG %s does not match the number of instances in the instance list: %s. ", len(asg), instanceList)
+			err := fmt.Errorf("The desired count (%d) in the ASG %s does not match the number of instances in the instance list: %s. ", len(asg), asg, instanceList)
 			glog.V(4).Infof("%s", err)
 			return err
 		}
@@ -389,7 +389,7 @@ func (c *AwsEc2Controller) replaceInstancesVerifyAndTerminate(awsClient *AwsClie
 	temporaryDesiredCount := int64(desiredCount * 2)
 	creationTime := time.Now()
 	for _, asg := range myComponent.asgs {
-		_, err = awsClient.autoscaling.controller.setDesiredCount(awsClient.autoscaling.client, asg, temporaryDesiredCount)
+		_, err = awsClient.autoscaling.setDesiredCount(asg, temporaryDesiredCount)
 		if err != nil {
 			err = fmt.Errorf("Got error when trying to set the desired count for ASG %s: %s. ", asg, err)
 			glog.V(4).Infof("%s", err)
@@ -398,14 +398,14 @@ func (c *AwsEc2Controller) replaceInstancesVerifyAndTerminate(awsClient *AwsClie
 	}
 
 	// Wait for all new nodes to come up before continuing
-	newInstances, err := awsClient.ec2.controller.findReplacementInstances(awsClient.ec2.client, component, ansibleVersion, desiredCount, creationTime)
+	newInstances, err := awsClient.ec2.findReplacementInstances(component, ansibleVersion, desiredCount, creationTime)
 	if err != nil {
 		err = fmt.Errorf("An error occurred finding the replacement instances for component %s\n Error: %s\n", component, err)
 		glog.V(4).Infof("%s", err)
 		return err
 	}
 
-	err = awsClient.ec2.controller.verifyReplacementInstances(awsClient.ec2.client, component, newInstances)
+	err = awsClient.ec2.verifyReplacementInstances(component, newInstances)
 	if err != nil {
 		err = fmt.Errorf("An error occurred verifying the health of instances %s\n Error: %s\n", newInstances, err)
 		glog.V(4).Infof("%s", err)
@@ -427,7 +427,7 @@ func (c *AwsEc2Controller) replaceInstancesVerifyAndTerminate(awsClient *AwsClie
 	glog.V(4).Infof("Starting instance termination for cordoned kubernetes nodes for %s", myComponent.name)
 	sleepSeconds := time.Duration(30 * time.Second)
 	for _, instanceId := range instanceList {
-		response, err := awsClient.ec2.controller.terminateInstance(awsClient.ec2.client, instanceId)
+		response, err := awsClient.ec2.terminateInstance(instanceId)
 		if err != nil {
 			err = fmt.Errorf("An error occurred while terminating %s instance %s\n Error: %s\n Response: %s\n", myComponent.name, instanceId, err, response)
 			glog.V(4).Infof("%s", err)
@@ -439,7 +439,7 @@ func (c *AwsEc2Controller) replaceInstancesVerifyAndTerminate(awsClient *AwsClie
 
 	// Set desired count back to what it was originally
 	for _, asg := range myComponent.asgs {
-		_, err = awsClient.autoscaling.controller.setDesiredCount(awsClient.autoscaling.client, asg, int64(desiredCount))
+		_, err = awsClient.autoscaling.setDesiredCount(asg, int64(desiredCount))
 		if err != nil {
 			err = fmt.Errorf("Got error when trying to set the desired count for ASG %s: %s. ", asg, err)
 			glog.V(4).Infof("%s", err)
@@ -499,10 +499,10 @@ func main() {
 	awsClient := NewAwsClient()
 	params := &ec2.DescribeInstancesInput{}
 	params.Filters = []*ec2.Filter{
-		awsClient.ec2.controller.newEC2Filter("tag:KubernetesCluster", kubernetesCluster),
-		awsClient.ec2.controller.newEC2Filter("instance-state-name", "running"),
+		awsClient.ec2.newEC2Filter("tag:KubernetesCluster", kubernetesCluster),
+		awsClient.ec2.newEC2Filter("instance-state-name", "running"),
 	}
-	inv, err := awsClient.ec2.controller.DescribeInstancesNotMatchingAnsibleVersion(awsClient.ec2.client, params, ansibleVersion)
+	inv, err := awsClient.ec2.DescribeInstancesNotMatchingAnsibleVersion(params, ansibleVersion)
 
 	if err != nil {
 		glog.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
@@ -544,7 +544,7 @@ func main() {
 	var wg sync.WaitGroup
 	for _, component := range targetComponents {
 		wg.Add(1)
-		go replaceInstancesTerminateAndVerify(state, awsClient, component, ansibleVersion, &wg)
+		go replaceInstancesTerminateAndVerify(awsClient, component, ansibleVersion, &wg)
 	}
 
 	wg.Wait()

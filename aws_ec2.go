@@ -21,12 +21,19 @@ type AwsEc2Client struct {
 }
 
 type AwsEc2Controller struct {
+	client  AwsEc2
 	filters []*ec2.Filter
 }
 
-func newAWSEc2Client() *AwsEc2Client {
+func newAWSEc2Client() AwsEc2 {
 	return &AwsEc2Client{
 		session: ec2.New(session.New()),
+	}
+}
+
+func newAWSEc2Controller(awsEc2Client AwsEc2) *AwsEc2Controller {
+	return &AwsEc2Controller{
+		client: awsEc2Client,
 	}
 }
 
@@ -42,7 +49,7 @@ func (e AwsEc2Client) TerminateInstances(input *ec2.TerminateInstancesInput) (*e
 	return e.session.TerminateInstances(input)
 }
 
-func (c *AwsEc2Controller) DescribeInstances(ec2Client AwsEc2, request *ec2.DescribeInstancesInput) ([]*ec2.Instance, error) {
+func (c *AwsEc2Controller) DescribeInstances(request *ec2.DescribeInstancesInput) ([]*ec2.Instance, error) {
 	// Instances are paged
 	results := []*ec2.Instance{}
 	var nextToken *string
@@ -55,7 +62,7 @@ func (c *AwsEc2Controller) DescribeInstances(ec2Client AwsEc2, request *ec2.Desc
 	}
 
 	for {
-		response, err := ec2Client.DescribeInstances(request)
+		response, err := c.client.DescribeInstances(request)
 
 		if err != nil {
 			return nil, fmt.Errorf("error listing AWS instances: %v", err)
@@ -79,8 +86,8 @@ func (c *AwsEc2Controller) DescribeInstances(ec2Client AwsEc2, request *ec2.Desc
 	return results, err
 }
 
-func (c *AwsEc2Controller) DescribeInstancesNotMatchingAnsibleVersion(ec2Client AwsEc2, request *ec2.DescribeInstancesInput, ansibleVersion string) ([]*ec2.Instance, error) {
-	results, err := c.DescribeInstances(ec2Client, request)
+func (c *AwsEc2Controller) DescribeInstancesNotMatchingAnsibleVersion(request *ec2.DescribeInstancesInput, ansibleVersion string) ([]*ec2.Instance, error) {
+	results, err := c.DescribeInstances(request)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +99,7 @@ func (c *AwsEc2Controller) DescribeInstancesNotMatchingAnsibleVersion(ec2Client 
 	return results, err
 }
 
-func (c *AwsEc2Controller) getInstanceHealth(ec2Client AwsEc2, instance string) (string, error) {
+func (c *AwsEc2Controller) getInstanceHealth(instance string) (string, error) {
 	status := "Unset"
 	params := &ec2.DescribeTagsInput{
 		Filters: []*ec2.Filter{
@@ -111,7 +118,7 @@ func (c *AwsEc2Controller) getInstanceHealth(ec2Client AwsEc2, instance string) 
 		},
 	}
 
-	resp, err := ec2Client.DescribeTags(params)
+	resp, err := c.client.DescribeTags(params)
 	if err != nil {
 		return status, err
 	}
@@ -206,7 +213,7 @@ func (c *AwsEc2Controller) newEC2Filter(name string, value string) *ec2.Filter {
 	return filter
 }
 
-func (c *AwsEc2Controller) terminateInstance(ec2Client AwsEc2, instance string) (*ec2.TerminateInstancesOutput, error) {
+func (c *AwsEc2Controller) terminateInstance(instance string) (*ec2.TerminateInstancesOutput, error) {
 	var resp *ec2.TerminateInstancesOutput
 	var err error
 
@@ -218,11 +225,11 @@ func (c *AwsEc2Controller) terminateInstance(ec2Client AwsEc2, instance string) 
 		},
 		DryRun: aws.Bool(false),
 	}
-	resp, err = ec2Client.TerminateInstances(params)
+	resp, err = c.client.TerminateInstances(params)
 	return resp, err
 }
 
-func (c *AwsEc2Controller) findReplacementInstances(ec2Client AwsEc2, component string, ansibleVersion string, count int, t time.Time) ([]string, error) {
+func (c *AwsEc2Controller) findReplacementInstances(component string, ansibleVersion string, count int, t time.Time) ([]string, error) {
 	var replacementInstances []string
 	var err error
 
@@ -236,7 +243,7 @@ func (c *AwsEc2Controller) findReplacementInstances(ec2Client AwsEc2, component 
 		params := &ec2.DescribeInstancesInput{}
 		params.Filters = []*ec2.Filter{c.newEC2Filter("tag:ServiceComponent", component)}
 
-		inv, err = c.DescribeInstancesNotMatchingAnsibleVersion(ec2Client, params, ansibleVersion)
+		inv, err = c.DescribeInstancesNotMatchingAnsibleVersion(params, ansibleVersion)
 		if err != nil {
 			glog.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
 		}
@@ -263,21 +270,21 @@ func (c *AwsEc2Controller) findReplacementInstances(ec2Client AwsEc2, component 
 	if len(replacementInstances) < count {
 		glog.Infof("Exiting find with an error for component %s.\n", component)
 		return replacementInstances, fmt.Errorf("Found %d/%d replacement %s instances. Giving up!\n",
-			len(replacementInstances), component)
+			len(replacementInstances), count, component)
 	}
 
 	glog.V(4).Infof("Exiting find without an error for component %s.\n", component)
 	return replacementInstances, err
 }
 
-func (c *AwsEc2Controller) verifyReplacementInstances(ec2Client AwsEc2, component string, instances []string) error {
+func (c *AwsEc2Controller) verifyReplacementInstances(component string, instances []string) error {
 	var err error
 	var status string
 	var validInstanceCount int
 
 	for loop := 0; loop < 30; loop++ {
 		for _, instance := range instances {
-			status, err = c.getInstanceHealth(ec2Client, instance)
+			status, err = c.getInstanceHealth(instance)
 			glog.Infof("Component %s instance %s current status is %s - %s \n", component, instance, status, timeStamp())
 			if err != nil {
 				return err

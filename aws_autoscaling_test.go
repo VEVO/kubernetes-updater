@@ -31,42 +31,38 @@ func (autoScalingClient *FakeAwsAutoscalingClient) GetDesiredCount(autoscalingIn
 	return fakeDescribeAutoScalingGroupsOutput, nil
 }
 
-func TestAwsManageASGProcesesSuspend(t *testing.T) {
-	awsAutoscalingclient := newFakeAWSAutoscalingClient()
-	awsAutoscalingController := &AwsAutoscalingController{}
+func TestAwsManageASGProcessesSuspend(t *testing.T) {
+	awsAutoscalingController := newAWSAutoscalingController(newFakeAWSAutoscalingClient())
 	scalingProcesses := []*string{
 		aws.String("AZRebalance"),
 	}
-	_, err := awsAutoscalingController.manageASGProcesses(awsAutoscalingclient, "infra-k8s-worker", scalingProcesses, "suspend")
+	_, err := awsAutoscalingController.manageASGProcesses("infra-k8s-worker", scalingProcesses, "suspend")
 	if err != nil {
 		t.Error("got error when attempting to suspend an ASG")
 	}
 }
 
-func TestAwsManageASGProcesesResume(t *testing.T) {
-	awsAutoscalingclient := newFakeAWSAutoscalingClient()
-	awsAutoscalingController := &AwsAutoscalingController{}
+func TestAwsManageASGProcessesResume(t *testing.T) {
+	awsAutoscalingController := newAWSAutoscalingController(newFakeAWSAutoscalingClient())
 	scalingProcesses := []*string{
 		aws.String("AZRebalance"),
 	}
-	_, err := awsAutoscalingController.manageASGProcesses(awsAutoscalingclient, "infra-k8s-worker", scalingProcesses, "resume")
+	_, err := awsAutoscalingController.manageASGProcesses("infra-k8s-worker", scalingProcesses, "resume")
 	if err != nil {
 		t.Error("got error when attempting to suspend an ASG")
 	}
 }
 
 func TestAwsSetDesiredCount(t *testing.T) {
-	awsAutoscalingclient := newFakeAWSAutoscalingClient()
-	awsAutoscalingController := &AwsAutoscalingController{}
-	_, err := awsAutoscalingController.setDesiredCount(awsAutoscalingclient, "infra-k8s-worker", 4)
+	awsAutoscalingController := newAWSAutoscalingController(newFakeAWSAutoscalingClient())
+	_, err := awsAutoscalingController.setDesiredCount("infra-k8s-worker", 4)
 	if err != nil {
 		t.Error("got error when attempting to set disired capacity for an ASG")
 	}
 }
 
 func TestAwsGetDesiredCount(t *testing.T) {
-	awsAutoscalingclient := newFakeAWSAutoscalingClient()
-	awsAutoscalingController := &AwsAutoscalingController{}
+	awsAutoscalingController := newAWSAutoscalingController(newFakeAWSAutoscalingClient())
 	asgName := "infra-k8s-worker"
 	asgCount := int64(3)
 	fakeAutoscalingGroup := autoscaling.Group{
@@ -79,11 +75,11 @@ func TestAwsGetDesiredCount(t *testing.T) {
 			fakeAutoscalingGroupPointer,
 		},
 	}
-	count, err := awsAutoscalingController.getDesiredCount(awsAutoscalingclient, asgName)
+	count, err := awsAutoscalingController.getDesiredCount(asgName)
 	if err != nil {
 		t.Errorf("got error when attempting to get disired capacity for an ASG: %s", err)
 	}
 	if count != 3 {
-		t.Errorf("got wrong count when attempting to get disired capacity for an ASG: expected 3, got %d")
+		t.Errorf("got wrong count when attempting to get disired capacity for an ASG: expected 3, got %d", count)
 	}
 }
