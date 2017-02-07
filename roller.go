@@ -42,6 +42,7 @@ var (
 	}
 	clusterAutoscalerServiceName      = "cluster-autoscaler"
 	clusterAutoscalerServiceNamespace = "kube-system"
+	provisionAttemptCounter           = make(map[string]int)
 )
 
 type componentType struct {
@@ -298,7 +299,7 @@ func cordonKubernetesNodes(kubernetesClient KubernetesClient, instanceList []str
 // Terminates and checks one or more instances at a time, in a "rolling" fashion. Differs from
 // replaceInstancesVerifyAndTerminate() in that it terminates the instances before verifying replacements.
 // Useful for small ASGs or when there is an upper limit to the number of instances you can have in the an ASG.
-func replaceInstancesTerminateAndVerify(awsClient *AwsClient, component string, ansibleVersion string, wg *sync.WaitGroup) error {
+func replaceInstancesTerminateAndVerify(awsClient *AwsClient, component, ansibleVersion string, wg *sync.WaitGroup) error {
 	glog.V(4).Infof("Starting process to terminate and replace instances for %s", component)
 
 	defer wg.Done()
@@ -330,17 +331,8 @@ func replaceInstancesTerminateAndVerify(awsClient *AwsClient, component string, 
 			return err
 		}
 
-		newInstances, err := awsClient.ec2.findReplacementInstances(component, ansibleVersion, newInstanceRollingCount, terminateTime)
+		_, err = findAndVerifyReplacementInstances(awsClient, myComponent, ansibleVersion, newInstanceRollingCount, terminateTime)
 		if err != nil {
-			err = fmt.Errorf("An error occurred finding the replacement instances for component %s\n Error: %s\n", component, err)
-			glog.V(4).Infof("%s", err)
-			return err
-		}
-
-		err = awsClient.ec2.verifyReplacementInstances(component, newInstances)
-		if err != nil {
-			err = fmt.Errorf("An error occurred verifying the health of instances %s\n Error: %s\n", newInstances, err)
-			glog.V(4).Infof("%s", err)
 			return err
 		}
 	}
@@ -407,18 +399,9 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 		}
 	}
 
-	// Wait for all new nodes to come up before continuing
-	newInstances, err := awsClient.ec2.findReplacementInstances(component, ansibleVersion, desiredCount, creationTime)
+	// Verify the new ec2 instances are created and that they are valid
+	newInstances, err := findAndVerifyReplacementInstances(awsClient, myComponent, ansibleVersion, desiredCount, creationTime)
 	if err != nil {
-		err = fmt.Errorf("An error occurred finding the replacement instances for component %s\n Error: %s\n", component, err)
-		glog.V(4).Infof("%s", err)
-		return err
-	}
-
-	err = awsClient.ec2.verifyReplacementInstances(component, newInstances)
-	if err != nil {
-		err = fmt.Errorf("An error occurred verifying the health of instances %s\n Error: %s\n", newInstances, err)
-		glog.V(4).Infof("%s", err)
 		return err
 	}
 
@@ -434,17 +417,9 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 	}
 
 	// Terminate the original instances one at a time and sleep for sleepSeconds in between
-	glog.V(4).Infof("Starting instance termination for cordoned kubernetes nodes for %s", myComponent.name)
-	sleepSeconds := time.Duration(30 * time.Second)
-	for _, instanceId := range instanceList {
-		response, err := awsClient.ec2.terminateInstance(instanceId)
-		if err != nil {
-			err = fmt.Errorf("An error occurred while terminating %s instance %s\n Error: %s\n Response: %s\n", myComponent.name, instanceId, err, response)
-			glog.V(4).Infof("%s", err)
-			return err
-		}
-		glog.V(4).Infof("Waiting %s for %s to terminate", sleepSeconds, instanceId)
-		time.Sleep(sleepSeconds)
+	err = terminateInstances(awsClient, instanceList, myComponent, time.Duration(30*time.Second))
+	if err != nil {
+		return err
 	}
 
 	// Set desired count back to what it was originally
@@ -459,6 +434,86 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 	}
 
 	return err
+}
+
+func terminateInstances(awsClient *AwsClient, instanceList []string, myComponent *componentType, sleepSeconds time.Duration) error {
+	glog.V(4).Infof("Starting instance termination for %s nodes", myComponent.name)
+	for _, instanceId := range instanceList {
+		response, err := awsClient.ec2.terminateInstance(instanceId)
+		if err != nil {
+			err = fmt.Errorf("An error occurred while terminating %s instance %s\n Error: %s\n Response: %s\n", myComponent.name, instanceId, err, response)
+			glog.V(4).Infof("%s", err)
+			return err
+		}
+		glog.V(4).Infof("Waiting %s for %s to terminate", sleepSeconds, instanceId)
+		time.Sleep(sleepSeconds)
+	}
+	return nil
+}
+
+func findAndVerifyReplacementInstances(awsClient *AwsClient, myComponent *componentType, ansibleVersion string, desiredCount int, creationTime time.Time) ([]string, error) {
+	if _, ok := provisionAttemptCounter[myComponent.name]; ok {
+		provisionAttemptCounter[myComponent.name]++
+	} else {
+		provisionAttemptCounter[myComponent.name] = 1
+	}
+
+	// Wait for all new nodes to come up before continuing
+	newInstances, err := awsClient.ec2.findReplacementInstances(myComponent, ansibleVersion, desiredCount, creationTime)
+	if err != nil {
+		err = fmt.Errorf("An error occurred finding the replacement instances for component %s\n Error: %s\n", myComponent.name, err)
+		glog.V(4).Infof("%s", err)
+		return newInstances, err
+	}
+
+	instances, err := awsClient.ec2.verifyReplacementInstances(myComponent, newInstances)
+	if err != nil {
+		if len(instances) > 0 {
+			startingInstanceCount := len(newInstances)
+			// If failure rate is at or under 25%, we will terminate and retry the failed instances. The exception
+			// to this is if we only start out with one or two instances, we will retry if there was only a
+			// single node failure.
+			retryFailureThreshold := .25
+
+			// If we have a high number of failures, don't attempt to try again
+			if startingInstanceCount > 2 {
+				if float64(len(instances))/float64(startingInstanceCount) > retryFailureThreshold {
+					err = fmt.Errorf("%s: Failure threshold too high (%f%%)", err, retryFailureThreshold*100)
+					glog.Error(err)
+					return instances, err
+				}
+			} else {
+				if len(instances) > 1 {
+					err = fmt.Errorf("%s: Failure threshold too high (%d)", err, len(instances))
+					glog.Error(err)
+					return instances, err
+				}
+			}
+
+			// If we've already tried twice with no success, it's time to give up
+			if _, ok := provisionAttemptCounter[myComponent.name]; ok {
+				if provisionAttemptCounter[myComponent.name] >= 2 {
+					err = fmt.Errorf("%s: Reached max number of attemps", err)
+					glog.Error(err)
+					return instances, err
+				} else {
+					glog.Infof("Failed to find valid replacement %s instances. Trying again", myComponent.name)
+					now := time.Now()
+					terminateInstances(awsClient, instances, myComponent, time.Duration(30*time.Second))
+					findAndVerifyReplacementInstances(awsClient, myComponent, ansibleVersion, len(instances), now)
+				}
+			} else {
+				glog.Errorf("%s", err)
+				return instances, err
+			}
+		}
+	}
+	if err != nil {
+		err = fmt.Errorf("An error occurred verifying the health of instances %s\n Error: %s\n", newInstances, err)
+		glog.V(4).Infof("%s", err)
+		return newInstances, err
+	}
+	return newInstances, nil
 }
 
 func main() {

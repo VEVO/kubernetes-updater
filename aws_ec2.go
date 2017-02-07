@@ -229,19 +229,18 @@ func (c *AwsEc2Controller) terminateInstance(instance string) (*ec2.TerminateIns
 	return resp, err
 }
 
-func (c *AwsEc2Controller) findReplacementInstances(component string, ansibleVersion string, count int, t time.Time) ([]string, error) {
-	var replacementInstances []string
+func (c *AwsEc2Controller) findReplacementInstances(myComponent *componentType, ansibleVersion string, count int, t time.Time) ([]string, error) {
+	newInstances := make(map[string]struct{})
 	var err error
 
 	// Loop until we have new healthy replacements or time has expired
 	for loop := 0; loop < 30; loop++ {
-		glog.Infof("Checking for replacement %d %s instances - %s - loop %d\n", count, component, timeStamp(), loop)
+		glog.Infof("Checking for %d replacement %s instances - %s - loop %d\n", count, myComponent.name, timeStamp(), loop)
 
-		var newInstances []string
 		var inv []*ec2.Instance
 
 		params := &ec2.DescribeInstancesInput{}
-		params.Filters = []*ec2.Filter{c.newEC2Filter("tag:ServiceComponent", component)}
+		params.Filters = []*ec2.Filter{c.newEC2Filter("tag:ServiceComponent", myComponent.name)}
 
 		inv, err = c.DescribeInstancesNotMatchingAnsibleVersion(params, ansibleVersion)
 		if err != nil {
@@ -255,29 +254,35 @@ func (c *AwsEc2Controller) findReplacementInstances(component string, ansibleVer
 
 		for _, e := range inv {
 			if e.LaunchTime.After(t) {
-				newInstances = append(newInstances, *e.InstanceId)
+				// Using a map with empty values gives us a set and/or a unique slice
+				newInstances[*e.InstanceId] = struct{}{}
 			}
 		}
 
 		if len(newInstances) == count {
-			replacementInstances = newInstances
 			break
 		}
 
 		time.Sleep(time.Second * 30)
 	}
 
-	if len(replacementInstances) < count {
-		glog.Infof("Exiting find with an error for component %s.\n", component)
-		return replacementInstances, fmt.Errorf("Found %d/%d replacement %s instances. Giving up!\n",
-			len(replacementInstances), count, component)
+	// We want to return a slice here rather than a map with empty values
+	var replacementInstances []string
+	for instance := range newInstances {
+		replacementInstances = append(replacementInstances, instance)
 	}
 
-	glog.V(4).Infof("Exiting find without an error for component %s.\n", component)
+	if len(replacementInstances) < count {
+		glog.Infof("Exiting find with an error for component %s.\n", myComponent.name)
+		return replacementInstances, fmt.Errorf("Found %d/%d replacement %s instances. Giving up!\n",
+			len(replacementInstances), count, myComponent.name)
+	}
+
+	glog.V(4).Infof("Exiting find without an error for component %s.\n", myComponent.name)
 	return replacementInstances, err
 }
 
-func (c *AwsEc2Controller) verifyReplacementInstances(component string, instances []string) error {
+func (c *AwsEc2Controller) verifyReplacementInstances(myComponent *componentType, instances []string) ([]string, error) {
 	var err error
 	var status string
 
@@ -286,12 +291,12 @@ func (c *AwsEc2Controller) verifyReplacementInstances(component string, instance
 			instance := instances[i]
 			status, err = c.getInstanceHealth(instance)
 			if err != nil {
-				return err
+				return instances, err
 			}
-			glog.Infof("Component %s instance %s current status is %s - %s \n", component, instance, status, timeStamp())
+			glog.Infof("Component %s instance %s current status is %s - %s \n", myComponent.name, instance, status, timeStamp())
 			if status == "True" {
-				glog.Infof("Verification complete component %s instance %s is healthy\n", component, instance)
-				// Remove instance from the slice so we don't check again
+				glog.Infof("Verification complete component %s instance %s is healthy\n", myComponent.name, instance)
+				// Remove instance from the slice so we don't check it again
 				instances = append(instances[:i], instances[i+1:]...)
 				continue
 			}
@@ -299,17 +304,17 @@ func (c *AwsEc2Controller) verifyReplacementInstances(component string, instance
 
 		// If any instances are not yet healthy, keep checking
 		if len(instances) > 0 {
-			glog.Infof("Still waiting for the following %s instances to become healthy %s\n", component, instances)
-			time.Sleep(time.Second * 5)
+			glog.Infof("Still waiting for the following %s instances to become healthy %s\n", myComponent.name, instances)
+			time.Sleep(time.Second * 30)
 			continue
 		}
 		break
 	}
 
 	if len(instances) > 0 {
-		return fmt.Errorf("Failed to verify %s instances %s", component, instances)
+		return instances, fmt.Errorf("Failed to verify %s instances %s", myComponent.name, instances)
 	}
 
-	glog.Infof("Verification complete component %s all instances are healthy\n", component)
-	return nil
+	glog.Infof("Verification complete component %s all instances are healthy\n", myComponent.name)
+	return instances, nil
 }
