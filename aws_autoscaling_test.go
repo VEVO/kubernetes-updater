@@ -27,7 +27,7 @@ func (autoScalingClient *FakeAwsAutoscalingClient) SetDesiredCount(input *autosc
 	return "{}", nil
 }
 
-func (autoScalingClient *FakeAwsAutoscalingClient) GetDesiredCount(autoscalingInstanceInput *autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
+func (autoScalingClient *FakeAwsAutoscalingClient) DescribeAutoscalingGroups(autoscalingInstanceInput *autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
 	return fakeDescribeAutoScalingGroupsOutput, nil
 }
 
@@ -81,5 +81,32 @@ func TestAwsGetDesiredCount(t *testing.T) {
 	}
 	if count != 3 {
 		t.Errorf("got wrong count when attempting to get disired capacity for an ASG: expected 3, got %d", count)
+	}
+}
+
+func TestAwsGetInstanceCount(t *testing.T) {
+	awsAutoscalingController := newAWSAutoscalingController(newFakeAWSAutoscalingClient())
+	asgName := "infra-k8s-worker"
+	fakeInstanceId := "fake-instance-id"
+	fakeAutoscalingGroup := autoscaling.Group{
+		AutoScalingGroupName: &asgName,
+		Instances: []*autoscaling.Instance{
+			&autoscaling.Instance{
+				InstanceId: &fakeInstanceId,
+			},
+		},
+	}
+	fakeAutoscalingGroupPointer := &fakeAutoscalingGroup
+	fakeDescribeAutoScalingGroupsOutput = &autoscaling.DescribeAutoScalingGroupsOutput{
+		AutoScalingGroups: []*autoscaling.Group{
+			fakeAutoscalingGroupPointer,
+		},
+	}
+	count, err := awsAutoscalingController.getInstanceCount(asgName)
+	if err != nil {
+		t.Errorf("got error when attempting to get instance count for an ASG: %s", err)
+	}
+	if count != 1 {
+		t.Errorf("got wrong count when attempting to get instance count for an ASG: expected 1, got %d", count)
 	}
 }

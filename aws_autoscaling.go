@@ -12,7 +12,7 @@ type AwsAutoscaling interface {
 	SuspendProcesses(*autoscaling.ScalingProcessQuery) (string, error)
 	ResumeProcesses(*autoscaling.ScalingProcessQuery) (string, error)
 	SetDesiredCount(*autoscaling.SetDesiredCapacityInput) (string, error)
-	GetDesiredCount(*autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error)
+	DescribeAutoscalingGroups(*autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error)
 }
 
 type AwsAutoscalingClient struct {
@@ -53,7 +53,7 @@ func (autoScalingClient *AwsAutoscalingClient) SetDesiredCount(desiredCapacity *
 	return response.String(), err
 }
 
-func (autoScalingClient *AwsAutoscalingClient) GetDesiredCount(autoscalingGroupInput *autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
+func (autoScalingClient *AwsAutoscalingClient) DescribeAutoscalingGroups(autoscalingGroupInput *autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
 	return autoScalingClient.session.DescribeAutoScalingGroups(autoscalingGroupInput)
 }
 
@@ -89,7 +89,7 @@ func (c *AwsAutoscalingController) getDesiredCount(asg string) (int64, error) {
 			&asg,
 		},
 	}
-	autoscalingGroupOutput, err := c.client.GetDesiredCount(autoscalingGroupInput)
+	autoscalingGroupOutput, err := c.client.DescribeAutoscalingGroups(autoscalingGroupInput)
 	if err != nil {
 		return -1, err
 	}
@@ -100,4 +100,25 @@ func (c *AwsAutoscalingController) getDesiredCount(asg string) (int64, error) {
 		}
 	}
 	return -1, fmt.Errorf("Could not find desired count for ASG %s", asg)
+}
+
+func (c *AwsAutoscalingController) getInstanceCount(asg string) (int, error) {
+	var instances []string
+	autoscalingGroupInput := &autoscaling.DescribeAutoScalingGroupsInput{
+		AutoScalingGroupNames: []*string{
+			&asg,
+		},
+	}
+	autoscalingGroupOutput, err := c.client.DescribeAutoscalingGroups(autoscalingGroupInput)
+	if err != nil {
+		return -1, err
+	}
+	for _, autoscalingGroup := range autoscalingGroupOutput.AutoScalingGroups {
+		if *autoscalingGroup.AutoScalingGroupName == asg {
+			for _, instance := range autoscalingGroup.Instances {
+				instances = append(instances, *instance.InstanceId)
+			}
+		}
+	}
+	return len(instances), nil
 }

@@ -422,6 +422,24 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 		return err
 	}
 
+	for _, asg := range myComponent.asgs {
+		for loop := 0; loop < 30; loop++ {
+			instanceCount, err := awsClient.autoscaling.getInstanceCount(asg)
+			if err != nil {
+				err = fmt.Errorf("An error occurred attempting to validate number of instances in ASG %s\n Error: %s\n", asg, err)
+				glog.V(4).Infof("%s", err)
+				return err
+			}
+			if instanceCount > desiredCount {
+				glog.V(4).Infof("Waiting for all nodes to terminate. Desired count for ASG %s must match the number"+
+					"of instances in the ASG", asg)
+				time.Sleep(5 * time.Second)
+			}
+			glog.V(4).Infof("All old nodes in ASG %s have terminated", asg)
+			break
+		}
+	}
+
 	// Set desired count back to what it was originally
 	for _, asg := range myComponent.asgs {
 		glog.V(4).Infof("Setting desired count for ASG %s to %d", asg, desiredCount)
@@ -433,7 +451,11 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 		}
 	}
 
-	return err
+	myComponent.status = true
+	myComponent.finish = time.Now()
+
+	glog.V(4).Infof("Completed normal instance verify and termination loop for component %s", myComponent.name)
+	return nil
 }
 
 func terminateInstances(awsClient *AwsClient, instanceList []string, myComponent *componentType, sleepSeconds time.Duration) error {
