@@ -121,7 +121,7 @@ func (s *rollerState) Summary() error {
 
 	for _, c := range s.components {
 		var status string
-		duration := time.Since(c.start)
+		duration := c.finish.Sub(c.start)
 		if c.status {
 			status = "success"
 		} else {
@@ -281,17 +281,22 @@ func cordonKubernetesNodes(kubernetesClient KubernetesClient, instanceList []str
 		}
 	}
 
+	nodesFail := make(map[string]error)
 	for _, node := range nodeListToCordon {
 		glog.V(4).Infof("Cordoning kubernetes node: %s\n", node.Name)
 		node.Spec.Unschedulable = true
 		node := &node
 		updatedNode, err := nodesController.UpdateNode(kubernetesClient, node)
 		if err != nil {
-			return fmt.Errorf("Failed to update node: %s", err)
+			nodesFail[node.Name] = err
 		}
 		if updatedNode.Spec.Unschedulable != true {
-			return fmt.Errorf("Failed to update node for unknown reason")
+			nodesFail[node.Name] = fmt.Errorf("Failed for unknown reason")
 		}
+	}
+
+	if len(nodesFail) > 0 {
+		return fmt.Errorf("Failed to cordon nodes: %s", nodesFail)
 	}
 	return nil
 }
@@ -413,7 +418,6 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 	if err != nil {
 		err = fmt.Errorf("An error occurred attempting to cordon kubernetes nodes %s\n Error: %s\n", newInstances, err)
 		glog.V(4).Infof("%s", err)
-		return err
 	}
 
 	// Terminate the original instances one at a time and sleep for sleepSeconds in between
@@ -430,10 +434,11 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 				glog.V(4).Infof("%s", err)
 				return err
 			}
-			if instanceCount > desiredCount {
-				glog.V(4).Infof("Waiting for all nodes to terminate. Desired count for ASG %s must match the number"+
+			if instanceCount != desiredCount {
+				glog.V(4).Infof("Waiting for all nodes to terminate. Previous desired count for ASG %s must match the number"+
 					"of instances in the ASG", asg)
 				time.Sleep(5 * time.Second)
+				continue
 			}
 			glog.V(4).Infof("All old nodes in ASG %s have terminated", asg)
 			break
@@ -584,6 +589,14 @@ func main() {
 
 	kubernetesEndpoint = fmt.Sprintf("https://%s-%s-kubernetes.vevo%s.com", awsRegion, cluster, awsAccount)
 
+	// Are we going to roll all of etcd, k8s-master and k8s-node or just
+	// a subset.
+	if rollerComponents != "" {
+		targetComponents = strings.Split(rollerComponents, ",")
+	} else {
+		targetComponents = defaultComponents
+	}
+
 	awsClient := NewAwsClient()
 	params := &ec2.DescribeInstancesInput{}
 	params.Filters = []*ec2.Filter{
@@ -603,14 +616,6 @@ func main() {
 			enabled: false,
 			status:  "success",
 		},
-	}
-
-	// Are we going to roll all of etcd, k8s-master and k8s-node or just
-	// a subset.
-	if rollerComponents != "" {
-		targetComponents = strings.Split(rollerComponents, ",")
-	} else {
-		targetComponents = defaultComponents
 	}
 
 	// Only manage the cluster autoscaler if rolling the k8s-node component.

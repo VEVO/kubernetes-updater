@@ -71,7 +71,6 @@ func (c *AwsAutoscalingController) manageASGProcesses(asg string, scalingProcess
 	} else {
 		response, err = c.client.ResumeProcesses(params)
 	}
-
 	return response, err
 }
 
