@@ -361,7 +361,6 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 		aws.String("AZRebalance"),
 		aws.String("Terminate"),
 	}
-
 	myComponent, instanceList, err := replaceInstancesPrepare(awsClient, component, scalingProcesses)
 	if err != nil {
 		err = fmt.Errorf("An error occurred while preparing for instance replacement for %s\n Error: %s\n", myComponent.name, err)
@@ -370,6 +369,11 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 	}
 
 	// Defer resume autoscaling activities
+	scalingProcesses = []*string{
+		aws.String("AZRebalance"),
+		aws.String("Terminate"),
+		aws.String("Launch"),
+	}
 	defer resumeASGProcesses(awsClient, scalingProcesses, myComponent)
 
 	var desiredCount int
@@ -420,6 +424,23 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 		glog.V(4).Infof("%s", err)
 	}
 
+	// Suspend the launch process so the ASG doesn't backfill the instances we're about to terminate
+	scalingProcesses = []*string{
+		aws.String("Launch"),
+	}
+	for _, asg := range myComponent.asgs {
+		_, err := awsClient.autoscaling.manageASGProcesses(asg, scalingProcesses, "suspend")
+		if err != nil {
+			return fmt.Errorf("An error occurred while suspending processes on %s\n Error: %s\n", asg, err)
+		}
+	}
+
+	// We have to unlock the Terminate process otherwise the instances will never be evicted from the ASG
+	scalingProcesses = []*string{
+		aws.String("Terminate"),
+	}
+	resumeASGProcesses(awsClient, scalingProcesses, myComponent)
+
 	// Terminate the original instances one at a time and sleep for sleepSeconds in between
 	err = terminateInstances(awsClient, instanceList, myComponent, time.Duration(30*time.Second))
 	if err != nil {
@@ -427,6 +448,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 	}
 
 	for _, asg := range myComponent.asgs {
+		asgOk := false
 		for loop := 0; loop < 30; loop++ {
 			instanceCount, err := awsClient.autoscaling.getInstanceCount(asg)
 			if err != nil {
@@ -437,11 +459,18 @@ func replaceInstancesVerifyAndTerminate(awsClient *AwsClient, component string, 
 			if instanceCount != desiredCount {
 				glog.V(4).Infof("Waiting for all nodes to terminate. Previous desired count for ASG %s must match the number"+
 					"of instances in the ASG", asg)
-				time.Sleep(5 * time.Second)
+				time.Sleep(30 * time.Second)
 				continue
 			}
 			glog.V(4).Infof("All old nodes in ASG %s have terminated", asg)
+			asgOk = true
 			break
+		}
+		if !asgOk {
+			err = fmt.Errorf("An error occurred attempting to validate number of instances in ASG %s\n "+
+				"Error: Timed out waiting for instances to be removed from ASG\n", asg)
+			glog.V(4).Infof("%s", err)
+			return err
 		}
 	}
 
