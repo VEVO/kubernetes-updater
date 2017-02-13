@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestAwsClient(t *testing.T) {
-	awsClient := NewAwsClient()
+	awsClient := newAwsClient()
 	if awsClient.ec2 == nil {
 		t.Failed()
 	}

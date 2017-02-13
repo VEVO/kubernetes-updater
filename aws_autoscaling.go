@@ -8,56 +8,56 @@ import (
 	"github.com/aws/aws-sdk-go/service/autoscaling"
 )
 
-type AwsAutoscaling interface {
-	SuspendProcesses(*autoscaling.ScalingProcessQuery) (string, error)
-	ResumeProcesses(*autoscaling.ScalingProcessQuery) (string, error)
-	SetDesiredCount(*autoscaling.SetDesiredCapacityInput) (string, error)
-	DescribeAutoscalingGroups(*autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error)
+type awsAutoscaling interface {
+	suspendProcesses(*autoscaling.ScalingProcessQuery) (string, error)
+	resumeProcesses(*autoscaling.ScalingProcessQuery) (string, error)
+	setDesiredCount(*autoscaling.SetDesiredCapacityInput) (string, error)
+	describeAutoscalingGroups(*autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error)
 }
 
-type AwsAutoscalingClient struct {
+type awsAutoscalingClient struct {
 	session *autoscaling.AutoScaling
 }
 
-type AwsAutoscalingController struct {
-	client AwsAutoscaling
+type awsAutoscalingController struct {
+	client awsAutoscaling
 }
 
-func newAWSAutoscalingClient() AwsAutoscaling {
-	return &AwsAutoscalingClient{
+func newAWSAutoscalingClient() awsAutoscaling {
+	return &awsAutoscalingClient{
 		session: autoscaling.New(session.New()),
 	}
 }
 
-func newAWSAutoscalingController(awsAutoscalingClient AwsAutoscaling) *AwsAutoscalingController {
-	return &AwsAutoscalingController{
+func newAWSAutoscalingController(awsAutoscalingClient awsAutoscaling) *awsAutoscalingController {
+	return &awsAutoscalingController{
 		client: awsAutoscalingClient,
 	}
 }
 
-func (autoScalingClient *AwsAutoscalingClient) SuspendProcesses(params *autoscaling.ScalingProcessQuery) (string, error) {
+func (autoScalingClient *awsAutoscalingClient) suspendProcesses(params *autoscaling.ScalingProcessQuery) (string, error) {
 	var response *autoscaling.SuspendProcessesOutput
 	response, err := autoScalingClient.session.SuspendProcesses(params)
 	return response.String(), err
 }
 
-func (autoScalingClient *AwsAutoscalingClient) ResumeProcesses(params *autoscaling.ScalingProcessQuery) (string, error) {
+func (autoScalingClient *awsAutoscalingClient) resumeProcesses(params *autoscaling.ScalingProcessQuery) (string, error) {
 	var response *autoscaling.ResumeProcessesOutput
 	response, err := autoScalingClient.session.ResumeProcesses(params)
 	return response.String(), err
 }
 
-func (autoScalingClient *AwsAutoscalingClient) SetDesiredCount(desiredCapacity *autoscaling.SetDesiredCapacityInput) (string, error) {
+func (autoScalingClient *awsAutoscalingClient) setDesiredCount(desiredCapacity *autoscaling.SetDesiredCapacityInput) (string, error) {
 	var response *autoscaling.SetDesiredCapacityOutput
 	response, err := autoScalingClient.session.SetDesiredCapacity(desiredCapacity)
 	return response.String(), err
 }
 
-func (autoScalingClient *AwsAutoscalingClient) DescribeAutoscalingGroups(autoscalingGroupInput *autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
+func (autoScalingClient *awsAutoscalingClient) describeAutoscalingGroups(autoscalingGroupInput *autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
 	return autoScalingClient.session.DescribeAutoScalingGroups(autoscalingGroupInput)
 }
 
-func (c *AwsAutoscalingController) manageASGProcesses(asg string, scalingProcesses []*string, action string) (string, error) {
+func (c *awsAutoscalingController) manageASGProcesses(asg string, scalingProcesses []*string, action string) (string, error) {
 	var err error
 	var response string
 
@@ -67,28 +67,28 @@ func (c *AwsAutoscalingController) manageASGProcesses(asg string, scalingProcess
 	}
 
 	if action == "suspend" {
-		response, err = c.client.SuspendProcesses(params)
+		response, err = c.client.suspendProcesses(params)
 	} else {
-		response, err = c.client.ResumeProcesses(params)
+		response, err = c.client.resumeProcesses(params)
 	}
 	return response, err
 }
 
-func (c *AwsAutoscalingController) setDesiredCount(asg string, desiredCapacity int64) (string, error) {
+func (c *awsAutoscalingController) setDesiredCount(asg string, desiredCapacity int64) (string, error) {
 	scalingProcessQuery := &autoscaling.SetDesiredCapacityInput{
 		AutoScalingGroupName: &asg,
 		DesiredCapacity:      &desiredCapacity,
 	}
-	return c.client.SetDesiredCount(scalingProcessQuery)
+	return c.client.setDesiredCount(scalingProcessQuery)
 }
 
-func (c *AwsAutoscalingController) getDesiredCount(asg string) (int64, error) {
+func (c *awsAutoscalingController) getDesiredCount(asg string) (int64, error) {
 	autoscalingGroupInput := &autoscaling.DescribeAutoScalingGroupsInput{
 		AutoScalingGroupNames: []*string{
 			&asg,
 		},
 	}
-	autoscalingGroupOutput, err := c.client.DescribeAutoscalingGroups(autoscalingGroupInput)
+	autoscalingGroupOutput, err := c.client.describeAutoscalingGroups(autoscalingGroupInput)
 	if err != nil {
 		return -1, err
 	}
@@ -101,14 +101,14 @@ func (c *AwsAutoscalingController) getDesiredCount(asg string) (int64, error) {
 	return -1, fmt.Errorf("Could not find desired count for ASG %s", asg)
 }
 
-func (c *AwsAutoscalingController) getInstanceCount(asg string) (int, error) {
+func (c *awsAutoscalingController) getInstanceCount(asg string) (int, error) {
 	var instances []string
 	autoscalingGroupInput := &autoscaling.DescribeAutoScalingGroupsInput{
 		AutoScalingGroupNames: []*string{
 			&asg,
 		},
 	}
-	autoscalingGroupOutput, err := c.client.DescribeAutoscalingGroups(autoscalingGroupInput)
+	autoscalingGroupOutput, err := c.client.describeAutoscalingGroups(autoscalingGroupInput)
 	if err != nil {
 		return -1, err
 	}

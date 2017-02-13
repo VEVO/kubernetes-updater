@@ -10,46 +10,46 @@ import (
 	"github.com/golang/glog"
 )
 
-type AwsEc2 interface {
-	DescribeInstances(*ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error)
-	DescribeTags(*ec2.DescribeTagsInput) (*ec2.DescribeTagsOutput, error)
-	TerminateInstances(*ec2.TerminateInstancesInput) (*ec2.TerminateInstancesOutput, error)
+type awsEc2 interface {
+	describeInstances(*ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error)
+	describeTags(*ec2.DescribeTagsInput) (*ec2.DescribeTagsOutput, error)
+	terminateInstances(*ec2.TerminateInstancesInput) (*ec2.TerminateInstancesOutput, error)
 }
 
-type AwsEc2Client struct {
+type awsEc2Client struct {
 	session *ec2.EC2
 }
 
-type AwsEc2Controller struct {
-	client  AwsEc2
+type awsEc2Controller struct {
+	client  awsEc2
 	filters []*ec2.Filter
 }
 
-func newAWSEc2Client() AwsEc2 {
-	return &AwsEc2Client{
+func newAWSEc2Client() awsEc2 {
+	return &awsEc2Client{
 		session: ec2.New(session.New()),
 	}
 }
 
-func newAWSEc2Controller(awsEc2Client AwsEc2) *AwsEc2Controller {
-	return &AwsEc2Controller{
+func newAWSEc2Controller(awsEc2Client awsEc2) *awsEc2Controller {
+	return &awsEc2Controller{
 		client: awsEc2Client,
 	}
 }
 
-func (e AwsEc2Client) DescribeInstances(input *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
+func (e awsEc2Client) describeInstances(input *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
 	return e.session.DescribeInstances(input)
 }
 
-func (e AwsEc2Client) DescribeTags(input *ec2.DescribeTagsInput) (*ec2.DescribeTagsOutput, error) {
+func (e awsEc2Client) describeTags(input *ec2.DescribeTagsInput) (*ec2.DescribeTagsOutput, error) {
 	return e.session.DescribeTags(input)
 }
 
-func (e AwsEc2Client) TerminateInstances(input *ec2.TerminateInstancesInput) (*ec2.TerminateInstancesOutput, error) {
+func (e awsEc2Client) terminateInstances(input *ec2.TerminateInstancesInput) (*ec2.TerminateInstancesOutput, error) {
 	return e.session.TerminateInstances(input)
 }
 
-func (c *AwsEc2Controller) DescribeInstances(request *ec2.DescribeInstancesInput) ([]*ec2.Instance, error) {
+func (c *awsEc2Controller) describeInstances(request *ec2.DescribeInstancesInput) ([]*ec2.Instance, error) {
 	// Instances are paged
 	results := []*ec2.Instance{}
 	var nextToken *string
@@ -62,7 +62,7 @@ func (c *AwsEc2Controller) DescribeInstances(request *ec2.DescribeInstancesInput
 	}
 
 	for {
-		response, err := c.client.DescribeInstances(request)
+		response, err := c.client.describeInstances(request)
 
 		if err != nil {
 			return nil, fmt.Errorf("error listing AWS instances: %v", err)
@@ -81,25 +81,25 @@ func (c *AwsEc2Controller) DescribeInstances(request *ec2.DescribeInstancesInput
 
 	// Apparently negative filters do not work with AWS so here we filter
 	// out the instances which do not match the desired ansible version
-	results, err = c.InstancesNotMatchingTagValue("version", ansibleVersion, results)
+	results, err = c.instancesNotMatchingTagValue("version", ansibleVersion, results)
 
 	return results, err
 }
 
-func (c *AwsEc2Controller) DescribeInstancesNotMatchingAnsibleVersion(request *ec2.DescribeInstancesInput, ansibleVersion string) ([]*ec2.Instance, error) {
-	results, err := c.DescribeInstances(request)
+func (c *awsEc2Controller) describeInstancesNotMatchingAnsibleVersion(request *ec2.DescribeInstancesInput, ansibleVersion string) ([]*ec2.Instance, error) {
+	results, err := c.describeInstances(request)
 	if err != nil {
 		return nil, err
 	}
 
 	// Apparently negative filters do not work with AWS so here we filter
 	// out the instances which do not match the desired ansible version
-	results, err = c.InstancesNotMatchingTagValue("version", ansibleVersion, results)
+	results, err = c.instancesNotMatchingTagValue("version", ansibleVersion, results)
 
 	return results, err
 }
 
-func (c *AwsEc2Controller) getInstanceHealth(instance string) (string, error) {
+func (c *awsEc2Controller) getInstanceHealth(instance string) (string, error) {
 	status := "Unset"
 	params := &ec2.DescribeTagsInput{
 		Filters: []*ec2.Filter{
@@ -118,7 +118,7 @@ func (c *AwsEc2Controller) getInstanceHealth(instance string) (string, error) {
 		},
 	}
 
-	resp, err := c.client.DescribeTags(params)
+	resp, err := c.client.describeTags(params)
 	if err != nil {
 		return status, err
 	}
@@ -131,15 +131,15 @@ func (c *AwsEc2Controller) getInstanceHealth(instance string) (string, error) {
 	return status, err
 }
 
-func (c *AwsEc2Controller) InstancesMatchingTagValue(tagName, tagValue string, instances []*ec2.Instance) ([]*ec2.Instance, error) {
-	return c.FiltersInstancesByTagValue(tagName, tagValue, false, instances)
+func (c *awsEc2Controller) instancesMatchingTagValue(tagName, tagValue string, instances []*ec2.Instance) ([]*ec2.Instance, error) {
+	return c.filtersInstancesByTagValue(tagName, tagValue, false, instances)
 }
 
-func (c *AwsEc2Controller) InstancesNotMatchingTagValue(tagName, tagValue string, instances []*ec2.Instance) ([]*ec2.Instance, error) {
-	return c.FiltersInstancesByTagValue(tagName, tagValue, true, instances)
+func (c *awsEc2Controller) instancesNotMatchingTagValue(tagName, tagValue string, instances []*ec2.Instance) ([]*ec2.Instance, error) {
+	return c.filtersInstancesByTagValue(tagName, tagValue, true, instances)
 }
 
-func (c *AwsEc2Controller) FiltersInstancesByTagValue(tagName, tagValue string, inverse bool, instances []*ec2.Instance) ([]*ec2.Instance, error) {
+func (c *awsEc2Controller) filtersInstancesByTagValue(tagName, tagValue string, inverse bool, instances []*ec2.Instance) ([]*ec2.Instance, error) {
 	results := []*ec2.Instance{}
 	for _, instance := range instances {
 		var tagMatch bool
@@ -161,7 +161,7 @@ func (c *AwsEc2Controller) FiltersInstancesByTagValue(tagName, tagValue string, 
 	return results, nil
 }
 
-func (c *AwsEc2Controller) GetUniqueTagValues(tagName string, instances []*ec2.Instance) ([]string, error) {
+func (c *awsEc2Controller) getUniqueTagValues(tagName string, instances []*ec2.Instance) ([]string, error) {
 	var results []string
 
 	for _, instance := range instances {
@@ -190,10 +190,8 @@ func (c *AwsEc2Controller) GetUniqueTagValues(tagName string, instances []*ec2.I
 	return results, nil
 }
 
-func (c *AwsEc2Controller) mergeFilters(filters []*ec2.Filter) ([]*ec2.Filter, error) {
-	for _, f := range c.filters {
-		filters = append(filters, f)
-	}
+func (c *awsEc2Controller) mergeFilters(filters []*ec2.Filter) ([]*ec2.Filter, error) {
+	filters = append(filters, c.filters...)
 
 	if len(filters) == 0 {
 		// We can't pass a zero-length Filters to AWS (it's an error)
@@ -203,7 +201,7 @@ func (c *AwsEc2Controller) mergeFilters(filters []*ec2.Filter) ([]*ec2.Filter, e
 	return filters, nil
 }
 
-func (c *AwsEc2Controller) newEC2Filter(name string, value string) *ec2.Filter {
+func (c *awsEc2Controller) newEC2Filter(name string, value string) *ec2.Filter {
 	filter := &ec2.Filter{
 		Name: aws.String(name),
 		Values: []*string{
@@ -213,7 +211,7 @@ func (c *AwsEc2Controller) newEC2Filter(name string, value string) *ec2.Filter {
 	return filter
 }
 
-func (c *AwsEc2Controller) terminateInstance(instance string) (*ec2.TerminateInstancesOutput, error) {
+func (c *awsEc2Controller) terminateInstance(instance string) (*ec2.TerminateInstancesOutput, error) {
 	var resp *ec2.TerminateInstancesOutput
 	var err error
 
@@ -225,11 +223,11 @@ func (c *AwsEc2Controller) terminateInstance(instance string) (*ec2.TerminateIns
 		},
 		DryRun: aws.Bool(false),
 	}
-	resp, err = c.client.TerminateInstances(params)
+	resp, err = c.client.terminateInstances(params)
 	return resp, err
 }
 
-func (c *AwsEc2Controller) findReplacementInstances(myComponent *componentType, ansibleVersion string, count int, t time.Time) ([]string, error) {
+func (c *awsEc2Controller) findReplacementInstances(myComponent *componentType, ansibleVersion string, count int, t time.Time) ([]string, error) {
 	newInstances := make(map[string]struct{})
 	var err error
 
@@ -242,7 +240,7 @@ func (c *AwsEc2Controller) findReplacementInstances(myComponent *componentType, 
 		params := &ec2.DescribeInstancesInput{}
 		params.Filters = []*ec2.Filter{c.newEC2Filter("tag:ServiceComponent", myComponent.name)}
 
-		inv, err = c.DescribeInstancesNotMatchingAnsibleVersion(params, ansibleVersion)
+		inv, err = c.describeInstancesNotMatchingAnsibleVersion(params, ansibleVersion)
 		if err != nil {
 			glog.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
 		}
@@ -274,7 +272,7 @@ func (c *AwsEc2Controller) findReplacementInstances(myComponent *componentType, 
 
 	if len(replacementInstances) < count {
 		glog.Infof("Exiting find with an error for component %s.\n", myComponent.name)
-		return replacementInstances, fmt.Errorf("Found %d/%d replacement %s instances. Giving up!\n",
+		return replacementInstances, fmt.Errorf("Found %d/%d replacement %s instances. Giving up",
 			len(replacementInstances), count, myComponent.name)
 	}
 
@@ -282,7 +280,7 @@ func (c *AwsEc2Controller) findReplacementInstances(myComponent *componentType, 
 	return replacementInstances, err
 }
 
-func (c *AwsEc2Controller) verifyReplacementInstances(myComponent *componentType, instances []string) ([]string, error) {
+func (c *awsEc2Controller) verifyReplacementInstances(myComponent *componentType, instances []string) ([]string, error) {
 	var err error
 	var status string
 

@@ -11,23 +11,23 @@ var fakeDescribeAutoScalingGroupsOutput = &autoscaling.DescribeAutoScalingGroups
 
 type FakeAwsAutoscalingClient struct{}
 
-func newFakeAWSAutoscalingClient() AwsAutoscaling {
+func newFakeAWSAutoscalingClient() awsAutoscaling {
 	return &FakeAwsAutoscalingClient{}
 }
 
-func (autoScalingClient *FakeAwsAutoscalingClient) SuspendProcesses(params *autoscaling.ScalingProcessQuery) (string, error) {
+func (autoScalingClient *FakeAwsAutoscalingClient) suspendProcesses(params *autoscaling.ScalingProcessQuery) (string, error) {
 	return "{}", nil
 }
 
-func (autoScalingClient *FakeAwsAutoscalingClient) ResumeProcesses(params *autoscaling.ScalingProcessQuery) (string, error) {
+func (autoScalingClient *FakeAwsAutoscalingClient) resumeProcesses(params *autoscaling.ScalingProcessQuery) (string, error) {
 	return "{}", nil
 }
 
-func (autoScalingClient *FakeAwsAutoscalingClient) SetDesiredCount(input *autoscaling.SetDesiredCapacityInput) (string, error) {
+func (autoScalingClient *FakeAwsAutoscalingClient) setDesiredCount(input *autoscaling.SetDesiredCapacityInput) (string, error) {
 	return "{}", nil
 }
 
-func (autoScalingClient *FakeAwsAutoscalingClient) DescribeAutoscalingGroups(autoscalingInstanceInput *autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
+func (autoScalingClient *FakeAwsAutoscalingClient) describeAutoscalingGroups(autoscalingInstanceInput *autoscaling.DescribeAutoScalingGroupsInput) (*autoscaling.DescribeAutoScalingGroupsOutput, error) {
 	return fakeDescribeAutoScalingGroupsOutput, nil
 }
 
@@ -87,12 +87,12 @@ func TestAwsGetDesiredCount(t *testing.T) {
 func TestAwsGetInstanceCount(t *testing.T) {
 	awsAutoscalingController := newAWSAutoscalingController(newFakeAWSAutoscalingClient())
 	asgName := "infra-k8s-worker"
-	fakeInstanceId := "fake-instance-id"
+	fakeInstanceID := "fake-instance-id"
 	fakeAutoscalingGroup := autoscaling.Group{
 		AutoScalingGroupName: &asgName,
 		Instances: []*autoscaling.Instance{
 			&autoscaling.Instance{
-				InstanceId: &fakeInstanceId,
+				InstanceId: &fakeInstanceID,
 			},
 		},
 	}

@@ -1,18 +1,15 @@
 package main
 
-import (
-	"fmt"
-	"testing"
-)
+import "testing"
 
 func TestKubernetesNodes_GetNodesByLabel(t *testing.T) {
-	client := NewFakeClient()
-	nodesController := KubernetesNodes{}
+	client := newFakeClient()
+	nodesController := kubernetesNodes{}
 	labels := make(map[string]string)
 	labels["instance-id"] = "i-fake-instanceid"
-	nodeList, err := nodesController.GetNodesByLabel(client, labels)
+	nodeList, err := nodesController.getNodesByLabel(client, labels)
 	if err != nil {
-		t.Error(fmt.Sprintf("failed to populate node by label: %s", err))
+		t.Errorf("failed to populate node by label: %s", err)
 	}
 
 	if len(nodeList.Items) <= 0 {
@@ -21,23 +18,22 @@ func TestKubernetesNodes_GetNodesByLabel(t *testing.T) {
 
 	for _, node := range nodeList.Items {
 		if node.ObjectMeta.Name != "fake-service" {
-			t.Error(fmt.Sprintf("expected fake-service but got %s", node.ObjectMeta.Name))
+			t.Errorf("expected fake-service but got %s", node.ObjectMeta.Name)
 		}
 		if node.ObjectMeta.Namespace != "fake-namespace" {
-			t.Error(fmt.Sprintf("expected fake-namespace but got %s", node.ObjectMeta.Namespace))
+			t.Errorf("expected fake-namespace but got %s", node.ObjectMeta.Namespace)
 		}
 	}
 }
 
 func TestKubernetesNodes_GetNodesByLabelMissing(t *testing.T) {
-	client := NewFakeClient()
-	nodesController := KubernetesNodes{}
+	client := newFakeClient()
+	nodesController := kubernetesNodes{}
 	labels := make(map[string]string)
 	labels["instance-id"] = "i-missing-instanceid"
-	nodeList, err := nodesController.GetNodesByLabel(client, labels)
-
+	nodeList, err := nodesController.getNodesByLabel(client, labels)
 	if err != nil {
-		t.Error(fmt.Sprintf("failed to populate node by label: %s", err))
+		t.Errorf("failed to populate node by label: %s", err)
 	}
 
 	if len(nodeList.Items) > 0 {
@@ -46,23 +42,23 @@ func TestKubernetesNodes_GetNodesByLabelMissing(t *testing.T) {
 }
 
 func TestKubernetesNodes_UpdateNodesByLabel(t *testing.T) {
-	client := NewFakeClient()
-	nodesController := KubernetesNodes{}
+	client := newFakeClient()
+	nodesController := kubernetesNodes{}
 	labels := make(map[string]string)
 	labels["instance-id"] = "i-fake-instanceid"
-	nodeList, err := nodesController.GetNodesByLabel(client, labels)
+	nodeList, err := nodesController.getNodesByLabel(client, labels)
 	if err != nil {
-		t.Error(fmt.Sprintf("failed to populate node by label: %s", err))
+		t.Errorf("failed to populate node by label: %s", err)
 	}
 
 	for _, node := range nodeList.Items {
 		node.Spec.Unschedulable = true
 		node := &node
-		updatedNode, err := nodesController.UpdateNode(client, node)
+		updatedNode, err := nodesController.updateNode(client, node)
 		if err != nil {
 			t.Error("failed to update node")
 		}
-		if updatedNode.Spec.Unschedulable != true {
+		if !updatedNode.Spec.Unschedulable {
 			t.Error("failed to update node")
 		}
 	}

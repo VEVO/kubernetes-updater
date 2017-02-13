@@ -1,20 +1,12 @@
 package main
 
-type AwsEc2Helper struct {
-	controller *AwsEc2Controller
+type awsClient struct {
+	ec2         *awsEc2Controller
+	autoscaling *awsAutoscalingController
 }
 
-type AwsAutoscalingHelper struct {
-	controller *AwsAutoscalingController
-}
-
-type AwsClient struct {
-	ec2         *AwsEc2Controller
-	autoscaling *AwsAutoscalingController
-}
-
-func NewAwsClient() *AwsClient {
-	awsClient := &AwsClient{
+func newAwsClient() *awsClient {
+	awsClient := &awsClient{
 		ec2:         newAWSEc2Controller(newAWSEc2Client()),
 		autoscaling: newAWSAutoscalingController(newAWSAutoscalingClient()),
 	}
