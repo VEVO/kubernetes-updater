@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/client-go/pkg/api/v1"
+
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/autoscaling"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/golang/glog"
 )
@@ -31,7 +31,6 @@ var (
 	ansibleVersion     = os.Getenv("ANSIBLE_VERSION")
 	kubernetesUsername = os.Getenv("KUBERNETES_USERNAME")
 	kubernetesPassword = os.Getenv("KUBERNETES_PASSWORD")
-	cloud              *awsCloudClient
 	state              *rollerState
 	kubernetesCluster  string
 	kubernetesEndpoint string
@@ -43,18 +42,8 @@ var (
 	}
 	clusterAutoscalerServiceName      = "cluster-autoscaler"
 	clusterAutoscalerServiceNamespace = "kube-system"
+	provisionAttemptCounter           = make(map[string]int)
 )
-
-type awsCloud interface {
-	EC2() *ec2.EC2
-	Autoscaling() *autoscaling.AutoScaling
-}
-
-type awsCloudClient struct {
-	ec2         *ec2.EC2
-	autoscaling *autoscaling.AutoScaling
-	filterTags  map[string]string
-}
 
 type componentType struct {
 	name      string
@@ -82,22 +71,6 @@ type clusterAutoscalerState struct {
 
 func timeStamp() string {
 	return time.Now().Format(time.RFC822)
-}
-
-func newAWSCloudClient() *awsCloudClient {
-	f := map[string]string{
-		"tag:KubernetesCluster": kubernetesCluster,
-		// We only want things that have completed an ansible run we will
-		// filter out the instances by version later.
-		//"tag:version":         "*",
-		"instance-state-name": "running",
-	}
-
-	return &awsCloudClient{
-		ec2:         ec2.New(session.New()),
-		autoscaling: autoscaling.New(session.New()),
-		filterTags:  f,
-	}
 }
 
 func (s *rollerState) SlackPost() error {
@@ -148,7 +121,7 @@ func (s *rollerState) Summary() error {
 
 	for _, c := range s.components {
 		var status string
-		duration := time.Since(c.start)
+		duration := c.finish.Sub(c.start)
 		if c.status {
 			status = "success"
 		} else {
@@ -170,367 +143,14 @@ func (s *rollerState) Summary() error {
 	return err
 }
 
-func (c *awsCloudClient) EC2() *ec2.EC2 {
-	return c.ec2
-}
-
-func (c *awsCloudClient) Autoscaling() *autoscaling.AutoScaling {
-	return c.autoscaling
-}
-
-func (c *awsCloudClient) DescribeInstances(request *ec2.DescribeInstancesInput) ([]*ec2.Instance, error) {
-	// Instances are paged
-	results := []*ec2.Instance{}
-	var nextToken *string
-
-	// Merge the default and request filters
-	request.Filters = c.addFilters(request.Filters)
-
-	for {
-		response, err := c.ec2.DescribeInstances(request)
-		if err != nil {
-			return nil, fmt.Errorf("error listing AWS instances: %v", err)
-		}
-
-		for _, reservation := range response.Reservations {
-			results = append(results, reservation.Instances...)
-		}
-
-		nextToken = response.NextToken
-		if aws.StringValue(nextToken) == "" {
-			break
-		}
-		request.NextToken = nextToken
-	}
-
-	// Apparently negative filters do not work with AWS so here we filter
-	// out the instances which do not match the desired ansible version
-	results, err := c.InstancesNotMatchingTagValue("version", ansibleVersion, results)
-
-	return results, err
-}
-
-func (c *awsCloudClient) getInstanceHealth(instance string) (string, error) {
-	status := "Unset"
-	params := &ec2.DescribeTagsInput{
-		Filters: []*ec2.Filter{
-			{
-				Name: aws.String("tag:healthy"),
-				Values: []*string{
-					aws.String("*"),
-				},
-			},
-			{
-				Name: aws.String("resource-id"),
-				Values: []*string{
-					aws.String(instance),
-				},
-			},
-		},
-	}
-
-	resp, err := c.ec2.DescribeTags(params)
-	if err != nil {
-		return status, err
-	}
-
-	for _, tag := range resp.Tags {
-		if *tag.Key == "healthy" {
-			status = *tag.Value
-		}
-	}
-	return status, err
-}
-
-func (c *awsCloudClient) InstancesMatchingTagValue(tagName, tagValue string, instances []*ec2.Instance) ([]*ec2.Instance, error) {
-
-	return c.FiltersInstancesByTagValue(tagName, tagValue, false, instances)
-}
-
-func (c *awsCloudClient) InstancesNotMatchingTagValue(tagName, tagValue string, instances []*ec2.Instance) ([]*ec2.Instance, error) {
-	return c.FiltersInstancesByTagValue(tagName, tagValue, true, instances)
-}
-
-func (c *awsCloudClient) FiltersInstancesByTagValue(tagName, tagValue string, inverse bool, instances []*ec2.Instance) ([]*ec2.Instance, error) {
-	results := []*ec2.Instance{}
-	for _, instance := range instances {
-		var tagMatch bool
-
-		for _, tag := range instance.Tags {
-			if *tag.Key == tagName {
-				if *tag.Value == tagValue {
-					tagMatch = true
-				}
-				break
-			}
-		}
-		if tagMatch && !inverse {
-			results = append(results, instance)
-		} else if inverse && !tagMatch {
-			results = append(results, instance)
-		}
-	}
-	return results, nil
-}
-
-func (c *awsCloudClient) GetUniqueTagValues(tagName string, instances []*ec2.Instance) ([]string, error) {
-	var results []string
-
-	for _, instance := range instances {
-		var tagValue string
-		var exists bool
-
-		for _, tag := range instance.Tags {
-			if *tag.Key == tagName {
-				tagValue = *tag.Value
-				break
-			}
-		}
-
-		for _, seen := range results {
-			if seen == tagValue {
-				exists = true
-				break
-			}
-		}
-
-		if !exists {
-			results = append(results, tagValue)
-		}
-
-	}
-	return results, nil
-}
-
-func (c *awsCloudClient) addFilters(filters []*ec2.Filter) []*ec2.Filter {
-	for k, v := range c.filterTags {
-		filters = append(filters, newEC2Filter(k, v))
-	}
-	if len(filters) == 0 {
-		// We can't pass a zero-length Filters to AWS (it's an error)
-		// So if we end up with no filters; just return nil
-		return nil
-	}
-
-	return filters
-}
-
-func newEC2Filter(name string, value string) *ec2.Filter {
-	filter := &ec2.Filter{
-		Name: aws.String(name),
-		Values: []*string{
-			aws.String(value),
-		},
-	}
-	return filter
-}
-
-func (c *awsCloudClient) terminateInstance(instance string) (*ec2.TerminateInstancesOutput, error) {
-	var resp *ec2.TerminateInstancesOutput
-	var err error
-
-	glog.V(4).Infof("Terminating instance %s\n", instance)
-
-	params := &ec2.TerminateInstancesInput{
-		InstanceIds: []*string{
-			aws.String(instance),
-		},
-		DryRun: aws.Bool(false),
-	}
-	resp, err = c.ec2.TerminateInstances(params)
-	return resp, err
-}
-
-func (c *awsCloudClient) findReplacementInstance(component string, t time.Time) (string, error) {
-	var newInstance string
-	var err error
-	var inv []*ec2.Instance
-
-	// Loop until we have a new healthy replacemen or time has expired
-	for loop := 0; loop < 30; loop++ {
-		glog.Infof("Checking for replacement %s instance - %s - loop %d\n", component, timeStamp(), loop)
-
-		params := &ec2.DescribeInstancesInput{}
-		params.Filters = []*ec2.Filter{newEC2Filter("tag:ServiceComponent", component)}
-		inv, err = c.DescribeInstances(params)
-		if err != nil {
-			glog.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
-		}
-
-		var instanceList []string
-		for _, e := range inv {
-			instanceList = append(instanceList, *e.InstanceId)
-		}
-
-		for _, e := range inv {
-			if e.LaunchTime.After(t) {
-				newInstance = *e.InstanceId
-			}
-		}
-
-		if newInstance != "" {
-			break
-		}
-		time.Sleep(time.Second * 30)
-	}
-
-	if newInstance == "" {
-		glog.Infof("Exiting find with an error for component %s.\n", component)
-		return newInstance, fmt.Errorf("Could not find a replacement %s instance.  Giving up!\n", component)
-	}
-	glog.V(4).Infof("Exiting find without an error for component %s.\n", component)
-	return newInstance, err
-}
-
-func (c *awsCloudClient) verifyReplacementInstance(component string, instance string) error {
-	var err error
-	var status string
-
-	for loop := 0; loop < 30; loop++ {
-		status, err = c.getInstanceHealth(instance)
-		glog.Infof("Component %s instance %s current status is %s - %s \n", component, instance, status, timeStamp())
-		if err != nil {
-			return err
-		}
-
-		if status == "True" {
-			glog.Infof("Verification complete component %s instance %s is healthy\n", component, instance)
-			return err
-		}
-		time.Sleep(time.Second * 60)
-	}
-	return fmt.Errorf("Timed out waiting for component %s instance %s to be healthy", component, instance)
-}
-
-func (c *awsCloudClient) terminateAndVerifyComponentInstances(component string, wg *sync.WaitGroup) error {
-	defer wg.Done()
-	// Get list of instances by filter on tag ServiceComponent == component
-	//	params.Filters = append(params.Filters, newEC2Filter("tag:ServiceComponent", "k8s-master"))
-	i, err := c.InstancesMatchingTagValue("ServiceComponent", component, state.inventory)
-	if err != nil {
-		return err
-	}
-
-	a, err := c.GetUniqueTagValues("aws:autoscaling:groupName", i)
-	if err != nil {
-		return err
-	}
-
-	myComponent := &componentType{
-		name:      component,
-		start:     time.Now(),
-		instances: i,
-		asgs:      a}
-
-	state.components = append(state.components, myComponent)
-
-	if component == "etcd" {
-		var e []*ec2.Instance
-		e, err = c.InstancesMatchingTagValue("healthy", "True", myComponent.instances)
-		if err != nil {
-			return err
-		}
-		var ee []*string
-		var ii []*string
-		for _, r := range e {
-			ee = append(ee, r.InstanceId)
-		}
-		for _, q := range e {
-			ii = append(ii, q.InstanceId)
-		}
-
-		if len(e) != len(i) {
-			myComponent.err = fmt.Errorf("Etcd components are not healthy.  Please fix and run again")
-			glog.V(4).Infof("%s", myComponent.err)
-			return myComponent.err
-		}
-	}
-
-	var instanceList []string
-	for _, e := range myComponent.instances {
-		instanceList = append(instanceList, *e.InstanceId)
-	}
-	glog.V(4).Infof("Component %s has starting instance Ids %v\n", component, instanceList)
-
-	// Pause autoscaling activities
-	for _, e := range myComponent.asgs {
-		_, err = c.manageASGProceses(e, "suspend")
-		if err != nil {
-			return fmt.Errorf("An error occurred while suspending processes on %s\n Error: %s\n", e, err)
-		}
-	}
-
-	// Defer resume autoscaling activities
-	for _, e := range myComponent.asgs {
-		defer c.manageASGProceses(e, "resume")
-		if err != nil {
-			return fmt.Errorf("An error occurred while resuming processes on %s\n Error: %s\n", e, err)
-		}
-	}
-
-	glog.V(4).Infof("Starting instance termination verify loop for component %s", myComponent.name)
-	for _, n := range myComponent.instances {
-		terminateTime := time.Now()
-		r, err := c.terminateInstance(*n.InstanceId)
-		if err != nil {
-			err = fmt.Errorf("An error occurred while terminating %s instance %s\n Error: %s\n Response: %s\n", myComponent.name, *n.InstanceId, err, r)
-			glog.V(4).Infof("%s", err)
-			return err
-		}
-
-		newInstance, err := c.findReplacementInstance(component, terminateTime)
-		if err != nil {
-			err = fmt.Errorf("An error occurred finding the replacement instance for component %s\n Error: %s\n", component, err)
-			glog.V(4).Infof("%s", err)
-			return err
-		}
-
-		err = c.verifyReplacementInstance(component, newInstance)
-		if err != nil {
-			err = fmt.Errorf("An error occurred verifying the health of instance %s\n Error: %s\n", newInstance, err)
-			glog.V(4).Infof("%s", err)
-			return err
-		}
-	}
-
-	myComponent.status = true
-	myComponent.finish = time.Now()
-
-	glog.V(4).Infof("Completed normal instance termination verify loop for component %s", myComponent.name)
-	return nil
-}
-
-func (c *awsCloudClient) manageASGProceses(asg string, action string) (string, error) {
-	var err error
-	var resp string
-
-	params := &autoscaling.ScalingProcessQuery{
-		AutoScalingGroupName: aws.String(asg),
-		ScalingProcesses: []*string{
-			aws.String("AZRebalance"),
-		},
-	}
-
-	if action == "suspend" {
-		var r *autoscaling.SuspendProcessesOutput
-		r, err = c.autoscaling.SuspendProcesses(params)
-		resp = r.String()
-	} else {
-		var r *autoscaling.ResumeProcessesOutput
-		r, err = c.autoscaling.ResumeProcesses(params)
-		resp = r.String()
-	}
-
-	return resp, err
-}
-
 func setReplicas(replicas int32) error {
-	client := NewClient(kubernetesEndpoint, kubernetesUsername, kubernetesPassword)
-	deploymentController := KubernetesDeployment{
+	glog.V(4).Infof("Setting replicas to %d for deployment %s", replicas, clusterAutoscalerServiceName)
+	client := newClient(kubernetesEndpoint, kubernetesUsername, kubernetesPassword)
+	deploymentController := kubernetesDeployment{
 		service:   clusterAutoscalerServiceName,
 		namespace: clusterAutoscalerServiceNamespace,
 	}
-	_, err := SetReplicasForDeployment(client, deploymentController, replicas)
+	_, err := setReplicasForDeployment(client, deploymentController, replicas)
 	return err
 }
 
@@ -560,6 +180,392 @@ func enableClusterAutoscaler(*rollerState) {
 		state.clusterAutoscaler.err = errors.New(errorMsg)
 		fmt.Println(errorMsg)
 	}
+}
+
+func addComponentToState(awsClient *awsClient, component string, state *rollerState) (*componentType, error) {
+	myComponent := &componentType{
+		name:  component,
+		start: time.Now(),
+	}
+
+	// Get list of instances by filter on tag ServiceComponent == component
+	//	params.Filters = append(params.Filters, newEC2Filter("tag:ServiceComponent", "k8s-master"))
+	instances, err := awsClient.ec2.instancesMatchingTagValue("ServiceComponent", component, state.inventory)
+	if err != nil {
+		return myComponent, err
+	}
+	myComponent.instances = instances
+
+	asgs, err := awsClient.ec2.getUniqueTagValues("aws:autoscaling:groupName", instances)
+	if err != nil {
+		return myComponent, err
+	}
+	myComponent.asgs = asgs
+
+	state.components = append(state.components, myComponent)
+	return myComponent, nil
+}
+
+func validateEtcdInstances(awsClient *awsClient, component *componentType) error {
+	instances, err := awsClient.ec2.instancesMatchingTagValue("healthy", "True", component.instances)
+	if err != nil {
+		return err
+	}
+
+	if len(instances) != len(component.instances) {
+		component.err = fmt.Errorf("etcd components are not healthy.  Please fix and run again")
+		glog.V(4).Infof("%s", component.err)
+		return component.err
+	}
+	return nil
+}
+
+// Obtains initial list of instances, does etcd validation, and initializes the state
+// with the component objects.
+func replaceInstancesPrepare(awsClient *awsClient, component string, scalingProcesses []*string) (*componentType, []string, error) {
+	var instanceList []string
+
+	myComponent, err := addComponentToState(awsClient, component, state)
+	if err != nil {
+		return myComponent, instanceList, fmt.Errorf("failed to add component to state: %s", err)
+	}
+
+	if component == "etcd" {
+		err = validateEtcdInstances(awsClient, myComponent)
+		if err != nil {
+			return myComponent, instanceList, fmt.Errorf("failed to validate etcd instances: %s", err)
+		}
+	}
+
+	for _, e := range myComponent.instances {
+		instanceList = append(instanceList, *e.InstanceId)
+	}
+	glog.V(4).Infof("Component %s has starting instance Ids %v\n", component, instanceList)
+
+	for _, asg := range myComponent.asgs {
+		glog.V(4).Infof("Suspending autoscaling processes for %s\n", asg)
+		_, err := awsClient.autoscaling.manageASGProcesses(asg, scalingProcesses, "suspend")
+		if err != nil {
+			return myComponent, instanceList, fmt.Errorf("an error occurred while suspending processes on %s\n Error: %s", asg, err)
+		}
+	}
+
+	return myComponent, instanceList, nil
+}
+
+func resumeASGProcesses(awsClient *awsClient, scalingProcesses []*string, component *componentType) {
+	for _, asg := range component.asgs {
+		glog.V(4).Infof("Resuming autoscaling processes for %s\n", asg)
+		_, err := awsClient.autoscaling.manageASGProcesses(asg, scalingProcesses, "resume")
+		if err != nil {
+			glog.Errorf("an error occurred while resuming processes on %s\n Error: %s", asg, err)
+			component.status = false
+		}
+	}
+}
+
+func cordonKubernetesNodes(kubernetesClient kubernetesClient, instanceList []string) error {
+	nodesController := kubernetesNodes{}
+	labels := make(map[string]string)
+	var nodeListToCordon []v1.Node
+
+	glog.V(4).Infof("Fetching kubernetes nodes for instance IDs: %s\n", instanceList)
+	for _, instanceID := range instanceList {
+		labels["instance-id"] = instanceID
+		nodeList, err := nodesController.getNodesByLabel(kubernetesClient, labels)
+		if err != nil {
+			return fmt.Errorf("failed to populate node by label: %s", err)
+		}
+		nodeListToCordon = append(nodeListToCordon, nodeList.Items...)
+	}
+
+	nodesFail := make(map[string]error)
+	for _, node := range nodeListToCordon {
+		glog.V(4).Infof("Cordoning kubernetes node: %s\n", node.Name)
+		node.Spec.Unschedulable = true
+		node := &node
+		updatedNode, err := nodesController.updateNode(kubernetesClient, node)
+		if err != nil {
+			nodesFail[node.Name] = err
+		}
+		if !updatedNode.Spec.Unschedulable {
+			nodesFail[node.Name] = fmt.Errorf("failed for unknown reason")
+		}
+	}
+
+	if len(nodesFail) > 0 {
+		return fmt.Errorf("failed to cordon nodes: %s", nodesFail)
+	}
+	return nil
+}
+
+// Terminates and checks one or more instances at a time, in a "rolling" fashion. Differs from
+// replaceInstancesVerifyAndTerminate() in that it terminates the instances before verifying replacements.
+// Useful for small ASGs or when there is an upper limit to the number of instances you can have in the an ASG.
+func replaceInstancesTerminateAndVerify(awsClient *awsClient, component, ansibleVersion string, wg *sync.WaitGroup) error {
+	glog.V(4).Infof("Starting process to terminate and replace instances for %s", component)
+
+	defer wg.Done()
+
+	// The number of instances to terminate and replace at a time
+	newInstanceRollingCount := 1
+
+	scalingProcesses := []*string{
+		aws.String("AZRebalance"),
+	}
+
+	myComponent, _, err := replaceInstancesPrepare(awsClient, component, scalingProcesses)
+	if err != nil {
+		err = fmt.Errorf("an error occurred while preparing for instance replacement for %s\n Error: %s", myComponent.name, err)
+		glog.V(4).Infof("%s", err)
+		return err
+	}
+
+	// Defer resume autoscaling activities
+	defer resumeASGProcesses(awsClient, scalingProcesses, myComponent)
+
+	glog.V(4).Infof("Starting instance termination verify loop for component %s", myComponent.name)
+	for _, n := range myComponent.instances {
+		terminateTime := time.Now()
+		r, err := awsClient.ec2.terminateInstance(*n.InstanceId)
+		if err != nil {
+			err = fmt.Errorf("an error occurred while terminating %s instance %s\n Error: %s\n Response: %s", myComponent.name, *n.InstanceId, err, r)
+			glog.V(4).Infof("%s", err)
+			return err
+		}
+
+		_, err = findAndVerifyReplacementInstances(awsClient, myComponent, ansibleVersion, newInstanceRollingCount, terminateTime)
+		if err != nil {
+			return err
+		}
+	}
+
+	myComponent.status = true
+	myComponent.finish = time.Now()
+
+	glog.V(4).Infof("Completed normal instance termination verify loop for component %s", myComponent.name)
+	return nil
+}
+
+// Spins up new replacement instances, verifies them, and then terminates the old instances. Differs from
+// replaceInstancesTerminateAndVerify() in that it verifies replacements before terminating the old instances.
+// Useful for large ASGs when there is no upper limit to the number of instances you can have in the ASG.
+func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, ansibleVersion string, wg *sync.WaitGroup) error {
+	glog.V(4).Infof("Starting process to start new instances and terminate existing for %s", component)
+
+	defer wg.Done()
+
+	scalingProcesses := []*string{
+		aws.String("AZRebalance"),
+		aws.String("Terminate"),
+	}
+	myComponent, instanceList, err := replaceInstancesPrepare(awsClient, component, scalingProcesses)
+	if err != nil {
+		err = fmt.Errorf("an error occurred while preparing for instance replacement for %s\n Error: %s", myComponent.name, err)
+		glog.V(4).Infof("%s", err)
+		return err
+	}
+
+	// Defer resume autoscaling activities
+	scalingProcesses = []*string{
+		aws.String("AZRebalance"),
+		aws.String("Terminate"),
+		aws.String("Launch"),
+	}
+	defer resumeASGProcesses(awsClient, scalingProcesses, myComponent)
+
+	var desiredCount int
+
+	// Ensure the total current instance count is the same as the desired count of the ASG
+	for _, asg := range myComponent.asgs {
+		count, err := awsClient.autoscaling.getDesiredCount(asg)
+		desiredCount = int(count)
+		glog.V(4).Infof("Starting desired count for ASG %s is %d", asg, desiredCount)
+		if err != nil {
+			err = fmt.Errorf("got error when trying to get the desired count for ASG %s: %s. ", asg, err)
+			glog.V(4).Infof("%s", err)
+			return err
+		}
+		if len(instanceList) != desiredCount {
+			err := fmt.Errorf("the desired count (%d) in the ASG %s does not match the number of instances in the instance list: %s. ", len(asg), asg, instanceList)
+			glog.V(4).Infof("%s", err)
+			return err
+		}
+	}
+
+	// Double the desired count
+	temporaryDesiredCount := int64(desiredCount * 2)
+	creationTime := time.Now()
+	for _, asg := range myComponent.asgs {
+		glog.V(4).Infof("Setting desired count for ASG %s to %d", asg, temporaryDesiredCount)
+		_, err = awsClient.autoscaling.setDesiredCount(asg, temporaryDesiredCount)
+		if err != nil {
+			err = fmt.Errorf("got error when trying to set the desired count for ASG %s: %s. ", asg, err)
+			glog.V(4).Infof("%s", err)
+			return err
+		}
+	}
+
+	// Verify the new ec2 instances are created and that they are valid
+	newInstances, err := findAndVerifyReplacementInstances(awsClient, myComponent, ansibleVersion, desiredCount, creationTime)
+	if err != nil {
+		return err
+	}
+
+	// Mark all the old kubernetes nodes as unschedulable. This is necessary because during the following
+	// termination step, we do not want pods to be rescheduled on the old nodes
+	glog.V(4).Infof("Starting kubernetes cordon process for %s", myComponent.name)
+	kubernetesClient := newClient(kubernetesEndpoint, kubernetesUsername, kubernetesPassword)
+	err = cordonKubernetesNodes(kubernetesClient, instanceList)
+	if err != nil {
+		err = fmt.Errorf("an error occurred attempting to cordon kubernetes nodes %s\n Error: %s", newInstances, err)
+		glog.V(4).Infof("%s", err)
+	}
+
+	// Suspend the launch process so the ASG doesn't backfill the instances we're about to terminate
+	scalingProcesses = []*string{
+		aws.String("Launch"),
+	}
+	for _, asg := range myComponent.asgs {
+		_, err := awsClient.autoscaling.manageASGProcesses(asg, scalingProcesses, "suspend")
+		if err != nil {
+			return fmt.Errorf("an error occurred while suspending processes on %s\n Error: %s", asg, err)
+		}
+	}
+
+	// We have to unlock the Terminate process otherwise the instances will never be evicted from the ASG
+	scalingProcesses = []*string{
+		aws.String("Terminate"),
+	}
+	resumeASGProcesses(awsClient, scalingProcesses, myComponent)
+
+	// Terminate the original instances one at a time and sleep for sleepSeconds in between
+	err = terminateInstances(awsClient, instanceList, myComponent, time.Duration(30*time.Second))
+	if err != nil {
+		return err
+	}
+
+	for _, asg := range myComponent.asgs {
+		asgOk := false
+		for loop := 0; loop < 30; loop++ {
+			instanceCount, err := awsClient.autoscaling.getInstanceCount(asg)
+			if err != nil {
+				err = fmt.Errorf("an error occurred attempting to validate number of instances in ASG %s\n Error: %s", asg, err)
+				glog.V(4).Infof("%s", err)
+				return err
+			}
+			if instanceCount != desiredCount {
+				glog.V(4).Infof("Waiting for all nodes to terminate. Previous desired count for ASG %s must match the number"+
+					"of instances in the ASG", asg)
+				time.Sleep(30 * time.Second)
+				continue
+			}
+			glog.V(4).Infof("All old nodes in ASG %s have terminated", asg)
+			asgOk = true
+			break
+		}
+		if !asgOk {
+			err = fmt.Errorf("an error occurred attempting to validate number of instances in ASG %s\n "+
+				"Error: Timed out waiting for instances to be removed from ASG", asg)
+			glog.V(4).Infof("%s", err)
+			return err
+		}
+	}
+
+	// Set desired count back to what it was originally
+	for _, asg := range myComponent.asgs {
+		glog.V(4).Infof("Setting desired count for ASG %s to %d", asg, desiredCount)
+		_, err = awsClient.autoscaling.setDesiredCount(asg, int64(desiredCount))
+		if err != nil {
+			err = fmt.Errorf("got error when trying to set the desired count for ASG %s: %s. ", asg, err)
+			glog.V(4).Infof("%s", err)
+			return err
+		}
+	}
+
+	myComponent.status = true
+	myComponent.finish = time.Now()
+
+	glog.V(4).Infof("Completed normal instance verify and termination loop for component %s", myComponent.name)
+	return nil
+}
+
+func terminateInstances(awsClient *awsClient, instanceList []string, myComponent *componentType, sleepSeconds time.Duration) error {
+	glog.V(4).Infof("Starting instance termination for %s nodes", myComponent.name)
+	for _, instanceID := range instanceList {
+		response, err := awsClient.ec2.terminateInstance(instanceID)
+		if err != nil {
+			err = fmt.Errorf("an error occurred while terminating %s instance %s\n Error: %s\n Response: %s", myComponent.name, instanceID, err, response)
+			glog.V(4).Infof("%s", err)
+			return err
+		}
+		glog.V(4).Infof("Waiting %s for %s to terminate", sleepSeconds, instanceID)
+		time.Sleep(sleepSeconds)
+	}
+	return nil
+}
+
+func findAndVerifyReplacementInstances(awsClient *awsClient, myComponent *componentType, ansibleVersion string, desiredCount int, creationTime time.Time) ([]string, error) {
+	if _, ok := provisionAttemptCounter[myComponent.name]; ok {
+		provisionAttemptCounter[myComponent.name]++
+	} else {
+		provisionAttemptCounter[myComponent.name] = 1
+	}
+
+	// Wait for all new nodes to come up before continuing
+	newInstances, err := awsClient.ec2.findReplacementInstances(myComponent, ansibleVersion, desiredCount, creationTime)
+	if err != nil {
+		err = fmt.Errorf("an error occurred finding the replacement instances for component %s\n Error: %s", myComponent.name, err)
+		glog.V(4).Infof("%s", err)
+		return newInstances, err
+	}
+
+	instances, err := awsClient.ec2.verifyReplacementInstances(myComponent, newInstances)
+	if err != nil {
+		if len(instances) > 0 {
+			startingInstanceCount := len(newInstances)
+			// If failure rate is at or under 25%, we will terminate and retry the failed instances. The exception
+			// to this is if we only start out with one or two instances, we will retry if there was only a
+			// single node failure.
+			retryFailureThreshold := .25
+
+			// If we have a high number of failures, don't attempt to try again
+			if startingInstanceCount > 2 {
+				if float64(len(instances))/float64(startingInstanceCount) > retryFailureThreshold {
+					err = fmt.Errorf("%s: Failure threshold too high (%f%%)", err, retryFailureThreshold*100)
+					glog.Error(err)
+					return instances, err
+				}
+			} else {
+				if len(instances) > 1 {
+					err = fmt.Errorf("%s: Failure threshold too high (%d)", err, len(instances))
+					glog.Error(err)
+					return instances, err
+				}
+			}
+
+			// If we've already tried twice with no success, it's time to give up
+			if _, ok := provisionAttemptCounter[myComponent.name]; ok {
+				if provisionAttemptCounter[myComponent.name] >= 2 {
+					err = fmt.Errorf("%s: Reached max number of attemps", err)
+					glog.Error(err)
+					return instances, err
+				}
+				glog.Infof("Failed to find valid replacement %s instances. Trying again", myComponent.name)
+				now := time.Now()
+				terminateInstances(awsClient, instances, myComponent, time.Duration(30*time.Second))
+				findAndVerifyReplacementInstances(awsClient, myComponent, ansibleVersion, len(instances), now)
+			}
+			glog.Errorf("%s", err)
+			return instances, err
+		}
+	}
+	if err != nil {
+		err = fmt.Errorf("an error occurred verifying the health of instances %s\n Error: %s", newInstances, err)
+		glog.V(4).Infof("%s", err)
+		return newInstances, err
+	}
+	return newInstances, nil
 }
 
 func main() {
@@ -608,9 +614,21 @@ func main() {
 
 	kubernetesEndpoint = fmt.Sprintf("https://%s-%s-kubernetes.vevo%s.com", awsRegion, cluster, awsAccount)
 
-	cloud = newAWSCloudClient()
+	// Are we going to roll all of etcd, k8s-master and k8s-node or just
+	// a subset.
+	if rollerComponents != "" {
+		targetComponents = strings.Split(rollerComponents, ",")
+	} else {
+		targetComponents = defaultComponents
+	}
+
+	awsClient := newAwsClient()
 	params := &ec2.DescribeInstancesInput{}
-	inv, err := cloud.DescribeInstances(params)
+	params.Filters = []*ec2.Filter{
+		awsClient.ec2.newEC2Filter("tag:KubernetesCluster", kubernetesCluster),
+		awsClient.ec2.newEC2Filter("instance-state-name", "running"),
+	}
+	inv, err := awsClient.ec2.describeInstancesNotMatchingAnsibleVersion(params, ansibleVersion)
 
 	if err != nil {
 		glog.Fatalf("An error occurred getting the EC2 inventory: %s.\n", err)
@@ -623,14 +641,6 @@ func main() {
 			enabled: false,
 			status:  "success",
 		},
-	}
-
-	// Are we going to roll all of etcd, k8s-master and k8s-node or just
-	// a subset.
-	if rollerComponents != "" {
-		targetComponents = strings.Split(rollerComponents, ",")
-	} else {
-		targetComponents = defaultComponents
 	}
 
 	// Only manage the cluster autoscaler if rolling the k8s-node component.
@@ -646,13 +656,24 @@ func main() {
 	err = state.SlackPost()
 	glog.V(4).Infof("Slack Post: %s", state.SlackText)
 	if err != nil {
-		glog.Errorf("An error occurred posting to slack.\nError %s\n", err)
+		glog.Errorf("an error occurred posting to slack.\nError %s", err)
 	}
 
 	var wg sync.WaitGroup
 	for _, component := range targetComponents {
 		wg.Add(1)
-		go cloud.terminateAndVerifyComponentInstances(component, &wg)
+		go func(component string) {
+			var err error
+			// Batch replace k8s-worker nodes and replace one at a time for k8s-master and etcd components
+			if component == "k8s-node" {
+				err = replaceInstancesVerifyAndTerminate(awsClient, component, ansibleVersion, &wg)
+			} else {
+				err = replaceInstancesTerminateAndVerify(awsClient, component, ansibleVersion, &wg)
+			}
+			if err != nil {
+				glog.Error(err)
+			}
+		}(component)
 	}
 
 	wg.Wait()
@@ -663,7 +684,7 @@ func main() {
 
 	err = state.Summary()
 	if err != nil {
-		glog.Errorf("An error occurred psting to slack.\nError %s\n", err)
+		glog.Errorf("an error occurred psting to slack.\nError %s", err)
 	}
 	glog.V(4).Infof("Slack Post: %s", state.SlackText)
 }

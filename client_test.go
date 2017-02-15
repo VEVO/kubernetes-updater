@@ -54,7 +54,7 @@ func fakeNodeList(listOptions v1.ListOptions) *v1.NodeList {
 	return nodeList
 }
 
-func NewFakeClient() KubernetesClient {
+func newFakeClient() kubernetesClient {
 	return &FakeKubernetesClientConfig{}
 }
 
@@ -62,10 +62,9 @@ func (c FakeKubernetesClientConfig) getDeployment(service string, namespace stri
 	if service == fakeDeployment.Spec.Template.ObjectMeta.Name && namespace ==
 		fakeDeployment.Spec.Template.ObjectMeta.Namespace {
 		return fakeDeployment, nil
-	} else {
-		err := fmt.Errorf("deployments.extensions \"%s\" not found", service)
-		return &v1beta1.Deployment{}, err
 	}
+	err := fmt.Errorf("deployments.extensions \"%s\" not found", service)
+	return &v1beta1.Deployment{}, err
 }
 
 func (c FakeKubernetesClientConfig) updateDeployment(newDeployment *v1beta1.Deployment) (*v1beta1.Deployment, error) {

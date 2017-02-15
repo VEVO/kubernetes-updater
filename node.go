@@ -4,20 +4,15 @@ import (
 	"k8s.io/client-go/pkg/api/v1"
 )
 
-type NodesController interface {
-	GetNodesByLabel(KubernetesClient) (*v1.NodeList, error)
-	UpdateNode(KubernetesClient, *v1.Node) (*v1.Node, error)
-}
-
-type KubernetesNode struct {
+type kubernetesNode struct {
 	name string
 }
 
-type KubernetesNodes struct {
-	list []KubernetesNode
+type kubernetesNodes struct {
+	list []kubernetesNode
 }
 
-func (k KubernetesNodes) GetNodesByLabel(client KubernetesClient, labels map[string]string) (*v1.NodeList, error) {
+func (k kubernetesNodes) getNodesByLabel(client kubernetesClient, labels map[string]string) (*v1.NodeList, error) {
 	listOptions := v1.ListOptions{
 		LabelSelector: keysString(labels),
 	}
@@ -25,7 +20,7 @@ func (k KubernetesNodes) GetNodesByLabel(client KubernetesClient, labels map[str
 	return nodeObject, err
 }
 
-func (k KubernetesNodes) UpdateNode(client KubernetesClient, node *v1.Node) (*v1.Node, error) {
+func (k kubernetesNodes) updateNode(client kubernetesClient, node *v1.Node) (*v1.Node, error) {
 	node, err := client.updateNode(node)
 	return node, err
 }
