@@ -29,11 +29,11 @@ var (
 	rollerComponents   = os.Getenv("ROLLER_COMPONENTS")
 	rollerLogLevel     = os.Getenv("ROLLER_LOG_LEVEL")
 	ansibleVersion     = os.Getenv("ANSIBLE_VERSION")
+	kubernetesServer   = os.Getenv("KUBERNETES_SERVER")
 	kubernetesUsername = os.Getenv("KUBERNETES_USERNAME")
 	kubernetesPassword = os.Getenv("KUBERNETES_PASSWORD")
 	state              *rollerState
 	kubernetesCluster  string
-	kubernetesEndpoint string
 	targetComponents   []string
 	defaultComponents  = []string{
 		"k8s-node",
@@ -145,7 +145,7 @@ func (s *rollerState) Summary() error {
 
 func setReplicas(replicas int32) error {
 	glog.V(4).Infof("Setting replicas to %d for deployment %s", replicas, clusterAutoscalerServiceName)
-	client := newClient(kubernetesEndpoint, kubernetesUsername, kubernetesPassword)
+	client := newClient(kubernetesServer, kubernetesUsername, kubernetesPassword)
 	deploymentController := kubernetesDeployment{
 		service:   clusterAutoscalerServiceName,
 		namespace: clusterAutoscalerServiceNamespace,
@@ -415,7 +415,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 	// Mark all the old kubernetes nodes as unschedulable. This is necessary because during the following
 	// termination step, we do not want pods to be rescheduled on the old nodes
 	glog.V(4).Infof("Starting kubernetes cordon process for %s", myComponent.name)
-	kubernetesClient := newClient(kubernetesEndpoint, kubernetesUsername, kubernetesPassword)
+	kubernetesClient := newClient(kubernetesServer, kubernetesUsername, kubernetesPassword)
 	err = cordonKubernetesNodes(kubernetesClient, instanceList)
 	if err != nil {
 		err = fmt.Errorf("an error occurred attempting to cordon kubernetes nodes %s\n Error: %s", newInstances, err)
@@ -604,6 +604,10 @@ func main() {
 
 	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsAccount, awsRegion, cluster)
 
+	if kubernetesServer == "" {
+		glog.Fatal("Set the KUBERNETES_SERVER variable to desired kubernetes server")
+	}
+
 	if kubernetesUsername == "" {
 		glog.Fatal("Set the KUBERNETES_USERNAME variable to desired kubernetes username")
 	}
@@ -611,8 +615,6 @@ func main() {
 	if kubernetesPassword == "" {
 		glog.Fatal("Set the KUBERNETES_PASSWORD variable to desired kubernetes password")
 	}
-
-	kubernetesEndpoint = fmt.Sprintf("https://%s-%s-kubernetes.vevo%s.com", awsRegion, cluster, awsAccount)
 
 	// Are we going to roll all of etcd, k8s-master and k8s-node or just
 	// a subset.
