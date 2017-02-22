@@ -39,3 +39,13 @@ Example usage for only rolling the etcd servers:
 ```
 KUBERNETES_SERVER=https://kubernetes ROLLER_COMPONENTS=etcd ./roller
 ```
+
+## Node Health Checks
+
+A node is considered healthy by the roller when the ec2 instance has the following tags:
+
+```
+healthy: True
+```
+
+If the tag either does not exist or has a value not equal to `True`, the roller considers the ec2 instance in a bad state and will not continue with the cluster roll.
