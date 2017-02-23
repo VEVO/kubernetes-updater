@@ -46,7 +46,7 @@ var (
 	clusterAutoscalerServiceName      = "cluster-autoscaler"
 	clusterAutoscalerServiceNamespace = "kube-system"
 	provisionAttemptCounter           = make(map[string]int)
-	terminationWaitPeriod             time.Duration
+	terminationWaitPeriod             = time.Duration(180 * time.Second)
 )
 
 type componentType struct {
@@ -391,7 +391,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 			return err
 		}
 		if len(instanceList) != desiredCount {
-			err := fmt.Errorf("the desired count (%d) in the ASG %s does not match the number of instances in the instance list: %s. ", len(asg), asg, instanceList)
+			err := fmt.Errorf("the desired count (%d) in the ASG %s does not match the number of instances in the instance list: %s. ", desiredCount, asg, instanceList)
 			glog.V(4).Infof("%s", err)
 			return err
 		}
@@ -444,7 +444,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 	resumeASGProcesses(awsClient, scalingProcesses, myComponent)
 
 	// Terminate the original instances one at a time and sleep for sleepSeconds in between
-	err = terminateInstances(awsClient, instanceList, myComponent, time.Duration(terminationWaitPeriod*time.Second))
+	err = terminateInstances(awsClient, instanceList, myComponent, terminationWaitPeriod)
 	if err != nil {
 		return err
 	}
@@ -495,7 +495,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 }
 
 func terminateInstances(awsClient *awsClient, instanceList []string, myComponent *componentType, sleepSeconds time.Duration) error {
-	glog.V(4).Infof("Starting instance termination for %s nodes", myComponent.name)
+	glog.V(2).Infof("Starting instance termination for %s nodes", myComponent.name)
 	for _, instanceID := range instanceList {
 		response, err := awsClient.ec2.terminateInstance(instanceID)
 		if err != nil {
@@ -503,7 +503,7 @@ func terminateInstances(awsClient *awsClient, instanceList []string, myComponent
 			glog.V(4).Infof("%s", err)
 			return err
 		}
-		glog.V(4).Infof("Waiting %s for %s to terminate", sleepSeconds, instanceID)
+		glog.V(2).Infof("Waiting %s for %s to terminate", sleepSeconds, instanceID)
 		time.Sleep(sleepSeconds)
 	}
 	return nil
@@ -620,10 +620,7 @@ func main() {
 		glog.Fatal("Set the KUBERNETES_PASSWORD variable to desired kubernetes password")
 	}
 
-	if terminationWaitPeriodStr == "" {
-		terminationWaitPeriod = time.Duration(180 * time.Second)
-
-	} else {
+	if terminationWaitPeriodStr != "" {
 		waitPeriod, err := strconv.ParseInt(terminationWaitPeriodStr, 10, 64)
 		if err != nil {
 			glog.Fatalf("Unable to parse TERMINATION_WAIT_PERIOD_SECONDS: %s", err)
