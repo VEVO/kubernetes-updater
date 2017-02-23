@@ -15,27 +15,30 @@ import (
 
 	"k8s.io/client-go/pkg/api/v1"
 
+	"strconv"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/golang/glog"
 )
 
 var (
-	cluster            = os.Getenv("CLUSTER")
-	awsAccount         = os.Getenv("AWS_ACCOUNT")
-	awsProfile         = os.Getenv("AWS_PROFILE")
-	awsRegion          = os.Getenv("AWS_REGION")
-	slackToken         = os.Getenv("SLACK_WEBHOOK")
-	rollerComponents   = os.Getenv("ROLLER_COMPONENTS")
-	rollerLogLevel     = os.Getenv("ROLLER_LOG_LEVEL")
-	ansibleVersion     = os.Getenv("ANSIBLE_VERSION")
-	kubernetesServer   = os.Getenv("KUBERNETES_SERVER")
-	kubernetesUsername = os.Getenv("KUBERNETES_USERNAME")
-	kubernetesPassword = os.Getenv("KUBERNETES_PASSWORD")
-	state              *rollerState
-	kubernetesCluster  string
-	targetComponents   []string
-	defaultComponents  = []string{
+	cluster                  = os.Getenv("CLUSTER")
+	awsAccount               = os.Getenv("AWS_ACCOUNT")
+	awsProfile               = os.Getenv("AWS_PROFILE")
+	awsRegion                = os.Getenv("AWS_REGION")
+	slackToken               = os.Getenv("SLACK_WEBHOOK")
+	rollerComponents         = os.Getenv("ROLLER_COMPONENTS")
+	rollerLogLevel           = os.Getenv("ROLLER_LOG_LEVEL")
+	ansibleVersion           = os.Getenv("ANSIBLE_VERSION")
+	kubernetesServer         = os.Getenv("KUBERNETES_SERVER")
+	kubernetesUsername       = os.Getenv("KUBERNETES_USERNAME")
+	kubernetesPassword       = os.Getenv("KUBERNETES_PASSWORD")
+	terminationWaitPeriodStr = os.Getenv("TERMINATION_WAIT_PERIOD_SECONDS")
+	state                    *rollerState
+	kubernetesCluster        string
+	targetComponents         []string
+	defaultComponents        = []string{
 		"k8s-node",
 		"k8s-master",
 		"etcd",
@@ -43,6 +46,7 @@ var (
 	clusterAutoscalerServiceName      = "cluster-autoscaler"
 	clusterAutoscalerServiceNamespace = "kube-system"
 	provisionAttemptCounter           = make(map[string]int)
+	terminationWaitPeriod             time.Duration
 )
 
 type componentType struct {
@@ -440,7 +444,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 	resumeASGProcesses(awsClient, scalingProcesses, myComponent)
 
 	// Terminate the original instances one at a time and sleep for sleepSeconds in between
-	err = terminateInstances(awsClient, instanceList, myComponent, time.Duration(30*time.Second))
+	err = terminateInstances(awsClient, instanceList, myComponent, time.Duration(terminationWaitPeriod*time.Second))
 	if err != nil {
 		return err
 	}
@@ -614,6 +618,17 @@ func main() {
 
 	if kubernetesPassword == "" {
 		glog.Fatal("Set the KUBERNETES_PASSWORD variable to desired kubernetes password")
+	}
+
+	if terminationWaitPeriodStr == "" {
+		terminationWaitPeriod = time.Duration(180 * time.Second)
+
+	} else {
+		waitPeriod, err := strconv.ParseInt(terminationWaitPeriodStr, 10, 64)
+		if err != nil {
+			glog.Fatalf("Unable to parse TERMINATION_WAIT_PERIOD_SECONDS: %s", err)
+		}
+		terminationWaitPeriod = (time.Duration(waitPeriod) * time.Second)
 	}
 
 	// Are we going to roll all of etcd, k8s-master and k8s-node or just
