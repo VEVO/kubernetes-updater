@@ -390,8 +390,16 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 			glog.V(4).Infof("%s", err)
 			return err
 		}
-		if len(instanceList) != desiredCount {
-			err := fmt.Errorf("the desired count (%d) in the ASG %s does not match the number of instances in the instance list: %s. ", desiredCount, asg, instanceList)
+
+		currentCount, err := awsClient.autoscaling.getInstanceCount(asg)
+		glog.V(4).Infof("Current count for ASG %s is %d", asg, currentCount)
+		if err != nil {
+			err = fmt.Errorf("got error when trying to get the current count for ASG %s: %s. ", asg, err)
+			glog.V(4).Infof("%s", err)
+			return err
+		}
+		if currentCount != desiredCount {
+			err := fmt.Errorf("the desired count (%d) in the ASG %s does not match the number of instances in the ASG: %s. ", desiredCount, asg, instanceList)
 			glog.V(4).Infof("%s", err)
 			return err
 		}
