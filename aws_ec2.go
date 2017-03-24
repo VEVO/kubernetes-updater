@@ -79,10 +79,6 @@ func (c *awsEc2Controller) describeInstances(request *ec2.DescribeInstancesInput
 		request.NextToken = nextToken
 	}
 
-	// Apparently negative filters do not work with AWS so here we filter
-	// out the instances which do not match the desired ansible version
-	results, err = c.instancesNotMatchingTagValue("version", ansibleVersion, results)
-
 	return results, err
 }
 
