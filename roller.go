@@ -674,23 +674,44 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
+	var masterWg sync.WaitGroup
+
+	// Roll through the master instances
 	for _, component := range targetComponents {
-		wg.Add(1)
-		go func(component string) {
-			var err error
-			// Batch replace k8s-worker nodes and replace one at a time for k8s-master and etcd components
-			if component == "k8s-node" {
-				err = replaceInstancesVerifyAndTerminate(awsClient, component, ansibleVersion, &wg)
-			} else {
-				err = replaceInstancesTerminateAndVerify(awsClient, component, ansibleVersion, &wg)
-			}
-			if err != nil {
-				glog.Error(err)
-			}
-		}(component)
+		if component == "k8s-master" {
+			masterWg.Add(1)
+			go func(component string) {
+				err := replaceInstancesTerminateAndVerify(awsClient, component, ansibleVersion, &masterWg)
+				if err != nil {
+					glog.Error(err)
+				}
+			}(component)
+		}
+	}
+
+	// Roll through the node or etcd instances
+	for _, component := range targetComponents {
+		if component != "k8s-master" {
+			wg.Add(1)
+			go func(component string) {
+				var err error
+				// Batch replace k8s-worker nodes and replace one at a time for etcd components
+				if component == "k8s-node" {
+					glog.V(2).Info("Waiting for any masters to complete before continuing with nodes")
+					masterWg.Wait()
+					err = replaceInstancesVerifyAndTerminate(awsClient, component, ansibleVersion, &wg)
+				} else {
+					err = replaceInstancesTerminateAndVerify(awsClient, component, ansibleVersion, &wg)
+				}
+				if err != nil {
+					glog.Error(err)
+				}
+			}(component)
+		}
 	}
 
 	wg.Wait()
+	masterWg.Wait()
 
 	if state.clusterAutoscaler.enabled {
 		enableClusterAutoscaler(state)
