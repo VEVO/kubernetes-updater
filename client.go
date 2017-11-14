@@ -24,6 +24,8 @@ func newClient(server string, username string, password string) kubernetesClient
 		Host:     server,
 		Username: username,
 		Password: password,
+		QPS:      100.0,
+		Burst:    200,
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {

@@ -397,23 +397,46 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 		}
 	}
 
-	// Double the desired count
-	temporaryDesiredCount := int64(desiredCount * 2)
-	creationTime := time.Now()
-	for _, asg := range myComponent.asgs {
-		glog.V(4).Infof("Setting desired count for ASG %s to %d", asg, temporaryDesiredCount)
-		_, err = awsClient.autoscaling.setDesiredCount(asg, temporaryDesiredCount)
+	// 5 seemed like a decent number to batch up our nodes.  This will create a larger number of ending nodes but the autoscaler will bring us back down.
+	desiredCountStep := 5
+
+	desiredCountTarget := desiredCount * 2
+	temporaryDesiredCount := desiredCount
+	var findNewCount int
+
+	for remaining := desiredCountTarget - temporaryDesiredCount; remaining != 0; {
+		//for temporaryDesiredCount := desiredCount + desiredCountStep; temporaryDesiredCount <= desiredCountTarget; temporaryDesiredCount = temporaryDesiredCount + desiredCountStep {
+
+		remaining = desiredCountTarget - temporaryDesiredCount
+		glog.V(4).Infof("Remaining nodes %d", remaining)
+
+		if remaining <= 10 {
+			temporaryDesiredCount = desiredCountTarget
+			findNewCount = remaining
+		} else {
+			temporaryDesiredCount = temporaryDesiredCount + desiredCountStep
+			findNewCount = desiredCountStep
+		}
+
+		glog.V(4).Infof("desiredCount is %d, desiredCountTarget is %d and temporaryDesiredCount is %d", desiredCount, desiredCountTarget, temporaryDesiredCount)
+
+		creationTime := time.Now()
+		for _, asg := range myComponent.asgs {
+			glog.V(4).Infof("Setting desired count for ASG %s to %d", asg, temporaryDesiredCount)
+			_, err = awsClient.autoscaling.setDesiredCount(asg, int64(temporaryDesiredCount))
+			if err != nil {
+				err = fmt.Errorf("got error when trying to set the desired count for ASG %s: %s. ", asg, err)
+				glog.V(4).Infof("%s", err)
+				return err
+			}
+		}
+
+		// Verify the new ec2 instances are created and that they are valid
+		newInstances, err := findAndVerifyReplacementInstances(awsClient, myComponent, ansibleVersion, findNewCount, creationTime)
+		glog.V(4).Infof("newInstances are %v", newInstances)
 		if err != nil {
-			err = fmt.Errorf("got error when trying to set the desired count for ASG %s: %s. ", asg, err)
-			glog.V(4).Infof("%s", err)
 			return err
 		}
-	}
-
-	// Verify the new ec2 instances are created and that they are valid
-	newInstances, err := findAndVerifyReplacementInstances(awsClient, myComponent, ansibleVersion, desiredCount, creationTime)
-	if err != nil {
-		return err
 	}
 
 	// Mark all the old kubernetes nodes as unschedulable. This is necessary because during the following
@@ -422,7 +445,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 	kubernetesClient := newClient(kubernetesServer, kubernetesUsername, kubernetesPassword)
 	err = cordonKubernetesNodes(kubernetesClient, instanceList)
 	if err != nil {
-		err = fmt.Errorf("an error occurred attempting to cordon kubernetes nodes %s\n Error: %s", newInstances, err)
+		err = fmt.Errorf("an error occurred attempting to cordon kubernetes nodes %s\n Error: %s", instanceList, err)
 		glog.V(4).Infof("%s", err)
 	}
 
