@@ -45,6 +45,8 @@ var (
 	}
 	clusterAutoscalerServiceName      = "cluster-autoscaler"
 	clusterAutoscalerServiceNamespace = "kube-system"
+	clusterTerminatorServiceName      = "terminator"
+	clusterTerminatorServiceNamespace = "kube-system"
 	provisionAttemptCounter           = make(map[string]int)
 	terminationWaitPeriod             = time.Duration(180 * time.Second)
 )
@@ -65,9 +67,16 @@ type rollerState struct {
 	inventory         []*ec2.Instance
 	SlackText         string `json:"text"`
 	clusterAutoscaler clusterAutoscalerState
+	clusterTerminator clusterTerminatorState
 }
 
 type clusterAutoscalerState struct {
+	enabled bool
+	status  string
+	err     error
+}
+
+type clusterTerminatorState struct {
 	enabled bool
 	status  string
 	err     error
@@ -147,12 +156,12 @@ func (s *rollerState) Summary() error {
 	return err
 }
 
-func setReplicas(replicas int32) error {
-	glog.V(4).Infof("Setting replicas to %d for deployment %s", replicas, clusterAutoscalerServiceName)
+func setReplicas(deployment, namespace string, replicas int32) error {
+	glog.V(4).Infof("Setting replicas to %d for deployment %s", replicas, deployment)
 	client := newClient(kubernetesServer, kubernetesUsername, kubernetesPassword)
 	deploymentController := kubernetesDeployment{
-		service:   clusterAutoscalerServiceName,
-		namespace: clusterAutoscalerServiceNamespace,
+		service:   deployment,
+		namespace: namespace,
 	}
 	_, err := setReplicasForDeployment(client, deploymentController, replicas)
 	return err
@@ -160,7 +169,7 @@ func setReplicas(replicas int32) error {
 
 func disableClusterAutoscaler(*rollerState) {
 	glog.V(4).Info("Disabling the cluster autoscaler")
-	err := setReplicas(0)
+	err := setReplicas(clusterAutoscalerServiceName, clusterAutoscalerServiceNamespace, 0)
 	if err == nil {
 		glog.V(4).Info("Successfully disabled the cluster autoscaler")
 		state.clusterAutoscaler.enabled = true
@@ -172,9 +181,23 @@ func disableClusterAutoscaler(*rollerState) {
 	}
 }
 
+func disableClusterTerminator(*rollerState) {
+	glog.V(4).Info("Disabling the cluster terminator")
+	err := setReplicas(clusterTerminatorServiceName, clusterTerminatorServiceNamespace, 0)
+	if err == nil {
+		glog.V(4).Info("Successfully disabled the cluster terminator")
+		state.clusterTerminator.enabled = true
+	} else {
+		state.clusterTerminator.status = "failure"
+		errorMsg := fmt.Sprintf("Error: unable to manage the terminator deployment, will skip. Error was: %s", err)
+		state.clusterTerminator.err = errors.New(errorMsg)
+		fmt.Println(errorMsg)
+	}
+}
+
 func enableClusterAutoscaler(*rollerState) {
 	glog.V(4).Info("Enabling the cluster autoscaler")
-	err := setReplicas(1)
+	err := setReplicas(clusterAutoscalerServiceName, clusterAutoscalerServiceNamespace, 1)
 	if err == nil {
 		glog.V(4).Info("Successfully enabled the cluster autoscaler")
 		state.clusterAutoscaler.enabled = true
@@ -182,6 +205,20 @@ func enableClusterAutoscaler(*rollerState) {
 		state.clusterAutoscaler.status = "failure"
 		errorMsg := fmt.Sprintf("Error: unable to re-enable the cluster-autoscaler deployment. Error was: %s", err)
 		state.clusterAutoscaler.err = errors.New(errorMsg)
+		fmt.Println(errorMsg)
+	}
+}
+
+func enableClusterTerminator(*rollerState) {
+	glog.V(4).Info("Enabling the cluster terminator")
+	err := setReplicas(clusterTerminatorServiceName, clusterTerminatorServiceNamespace, 1)
+	if err == nil {
+		glog.V(4).Info("Successfully enabled the cluster terminator")
+		state.clusterTerminator.enabled = true
+	} else {
+		state.clusterTerminator.status = "failure"
+		errorMsg := fmt.Sprintf("Error: unable to re-enable the terminator deployment. Error was: %s", err)
+		state.clusterTerminator.err = errors.New(errorMsg)
 		fmt.Println(errorMsg)
 	}
 }
@@ -685,6 +722,7 @@ func main() {
 	for _, component := range targetComponents {
 		if component == "k8s-node" {
 			disableClusterAutoscaler(state)
+			disableClusterTerminator(state)
 		}
 	}
 
@@ -738,6 +776,7 @@ func main() {
 
 	if state.clusterAutoscaler.enabled {
 		enableClusterAutoscaler(state)
+		enableClusterTerminator(state)
 	}
 
 	err = state.Summary()
