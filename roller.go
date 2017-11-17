@@ -51,6 +51,10 @@ var (
 	terminationWaitPeriod             = time.Duration(180 * time.Second)
 )
 
+const (
+	remainingThreshold = 10
+)
+
 type componentType struct {
 	name      string
 	start     time.Time
@@ -442,12 +446,11 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 	var findNewCount int
 
 	for remaining := desiredCountTarget - temporaryDesiredCount; remaining != 0; {
-		//for temporaryDesiredCount := desiredCount + desiredCountStep; temporaryDesiredCount <= desiredCountTarget; temporaryDesiredCount = temporaryDesiredCount + desiredCountStep {
 
 		remaining = desiredCountTarget - temporaryDesiredCount
 		glog.V(4).Infof("Remaining nodes %d", remaining)
 
-		if remaining <= 10 {
+		if remaining <= remainingThreshold {
 			temporaryDesiredCount = desiredCountTarget
 			findNewCount = remaining
 		} else {
