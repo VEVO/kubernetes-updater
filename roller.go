@@ -614,7 +614,7 @@ func findAndVerifyReplacementInstances(awsClient *awsClient, myComponent *compon
 			// If we've already tried twice with no success, it's time to give up
 			if _, ok := provisionAttemptCounter[myComponent.name]; ok {
 				if provisionAttemptCounter[myComponent.name] >= 2 {
-					err = fmt.Errorf("%s: Reached max number of attemps", err)
+					err = fmt.Errorf("%s: Reached max number of attempts", err)
 					glog.Error(err)
 					return instances, err
 				}
