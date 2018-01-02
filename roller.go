@@ -649,37 +649,24 @@ func main() {
 
 	glog.Info("Log level set to: ", flag.Lookup("v").Value)
 
-	if cluster == "" {
-		glog.Fatal("Set the CLUSTER variable to the name of the target kubernetes cluster")
-	}
-
-	if awsRegion == "" {
-		glog.Fatal("Set the AWS_REGION variable to the name of the desired AWS region")
-	}
-
-	if awsAccount == "" && awsProfile == "" {
-		glog.Fatal("Set one of the variables AWS_ACCOUNT or AWS_PROFILE")
-	}
-
-	if ansibleVersion == "" {
-		glog.Fatal("Set the ANSIBLE_VERSION variable to the desired ansible git sha")
-	}
-
-	if slackToken == "" {
-		glog.Fatal("Set the SLACK_WEBHOOK variable to desired webhook")
-	}
-
 	kubernetesCluster = fmt.Sprintf("%s-%s-%s", awsAccount, awsRegion, cluster)
 
-	if kubernetesServer == "" {
+	switch {
+	case cluster == "":
+		glog.Fatal("Set the CLUSTER variable to the name of the target kubernetes cluster")
+	case awsRegion == "":
+		glog.Fatal("Set the AWS_REGION variable to the name of the desired AWS region")
+	case awsAccount == "" && awsProfile == "":
+		glog.Fatal("Set one of the variables AWS_ACCOUNT or AWS_PROFILE")
+	case ansibleVersion == "":
+		glog.Fatal("Set the ANSIBLE_VERSION variable to the desired ansible git sha")
+	case slackToken == "":
+		glog.Fatal("Set the SLACK_WEBHOOK variable to desired webhook")
+	case kubernetesServer == "":
 		glog.Fatal("Set the KUBERNETES_SERVER variable to desired kubernetes server")
-	}
-
-	if kubernetesUsername == "" {
+	case kubernetesUsername == "":
 		glog.Fatal("Set the KUBERNETES_USERNAME variable to desired kubernetes username")
-	}
-
-	if kubernetesPassword == "" {
+	case kubernetesPassword == "":
 		glog.Fatal("Set the KUBERNETES_PASSWORD variable to desired kubernetes password")
 	}
 
