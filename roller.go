@@ -109,10 +109,10 @@ func (s *rollerState) SlackPost() error {
 	req.Header.Add("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
-	defer resp.Body.Close()
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 
 	_, err = ioutil.ReadAll(resp.Body)
 	return err
