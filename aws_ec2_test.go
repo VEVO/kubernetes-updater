@@ -18,7 +18,7 @@ func fakeEc2Instance() *ec2.Instance {
 	return &ec2.Instance{
 		InstanceId: &instanceID,
 		Tags: []*ec2.Tag{
-			&ec2.Tag{
+			{
 				Key:   &version,
 				Value: &instanceID,
 			},
