@@ -91,7 +91,7 @@ func TestAwsGetInstanceCount(t *testing.T) {
 	fakeAutoscalingGroup := autoscaling.Group{
 		AutoScalingGroupName: &asgName,
 		Instances: []*autoscaling.Instance{
-			&autoscaling.Instance{
+			{
 				InstanceId: &fakeInstanceID,
 			},
 		},
