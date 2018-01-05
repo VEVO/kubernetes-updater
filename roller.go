@@ -447,6 +447,9 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 
 	for remaining := desiredCountTarget - temporaryDesiredCount; remaining != 0; {
 
+		// Ensure that someone named Derek didn't enable the autoscaler while we are rolling the cluster
+		disableClusterAutoscaler(state)
+
 		remaining = desiredCountTarget - temporaryDesiredCount
 		glog.V(4).Infof("Remaining nodes %d", remaining)
 
