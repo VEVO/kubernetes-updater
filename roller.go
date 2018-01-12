@@ -49,6 +49,8 @@ var (
 	clusterTerminatorServiceNamespace = "kube-system"
 	provisionAttemptCounter           = make(map[string]int)
 	terminationWaitPeriod             = time.Duration(180 * time.Second)
+	apiKey                            = os.Getenv("DATADOG_API_KEY")
+	appKey                            = os.Getenv("DATADOG_APP_KEY")
 )
 
 const (
@@ -72,6 +74,8 @@ type rollerState struct {
 	SlackText         string `json:"text"`
 	clusterAutoscaler clusterAutoscalerState
 	clusterTerminator clusterTerminatorState
+	downtimeID        int
+	dd                *ddClientConfig
 }
 
 type clusterAutoscalerState struct {
@@ -671,6 +675,10 @@ func main() {
 		glog.Fatal("Set the KUBERNETES_USERNAME variable to desired kubernetes username")
 	case kubernetesPassword == "":
 		glog.Fatal("Set the KUBERNETES_PASSWORD variable to desired kubernetes password")
+	case apiKey == "":
+		glog.Fatal("Set the DATADOG_API_KEY")
+	case appKey == "":
+		glog.Fatal("Set the DATADOG_APP_KEY")
 	}
 
 	if terminationWaitPeriodStr != "" {
@@ -708,6 +716,13 @@ func main() {
 			enabled: false,
 			status:  "success",
 		},
+		dd: newDataDogClient(apiKey, appKey),
+	}
+
+	// Set downtime in datadog for the cluster
+	state.downtimeID, err = state.dd.startDownTime([]string{fmt.Sprintf("kubernetescluster:%s", kubernetesCluster)})
+	if err != nil {
+		glog.Errorf("an error occurred setting datadog downtime.\nError %s", err)
 	}
 
 	// Only manage the cluster autoscaler if rolling the k8s-node component.
@@ -770,6 +785,12 @@ func main() {
 	if state.clusterAutoscaler.enabled {
 		enableClusterAutoscaler(state)
 		enableClusterTerminator(state)
+	}
+
+	// End datadog downtime
+	err = state.dd.endDownTime(state.downtimeID)
+	if err != nil {
+		glog.Errorf("An error occurred unsetting the datadog downtime.\nError %s", err)
 	}
 
 	err = state.Summary()
