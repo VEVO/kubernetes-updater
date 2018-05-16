@@ -35,6 +35,8 @@ var (
 	kubernetesUsername       = os.Getenv("KUBERNETES_USERNAME")
 	kubernetesPassword       = os.Getenv("KUBERNETES_PASSWORD")
 	terminationWaitPeriodStr = os.Getenv("TERMINATION_WAIT_PERIOD_SECONDS")
+	desiredCountStepStr      = os.Getenv("TERMINATION_BATCH_NODES_SIZE")
+	desiredCountStep         = 5
 	state                    *rollerState
 	kubernetesCluster        string
 	targetComponents         []string
@@ -442,9 +444,6 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 		}
 	}
 
-	// 5 seemed like a decent number to batch up our nodes.  This will create a larger number of ending nodes but the autoscaler will bring us back down.
-	desiredCountStep := 5
-
 	desiredCountTarget := desiredCount * 2
 	temporaryDesiredCount := desiredCount
 	var findNewCount int
@@ -687,6 +686,14 @@ func main() {
 			glog.Fatalf("Unable to parse TERMINATION_WAIT_PERIOD_SECONDS: %s", err)
 		}
 		terminationWaitPeriod = (time.Duration(waitPeriod) * time.Second)
+	}
+
+	if desiredCountStepStr != "" {
+		var err error
+		desiredCountStep, err = strconv.Atoi(desiredCountStepStr)
+		if err != nil {
+			glog.Fatalf("Unable to parse TERMINATION_BATCH_NODES_SIZE: %s", err)
+		}
 	}
 
 	// Are we going to roll all of etcd, k8s-master and k8s-node or just
