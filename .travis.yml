@@ -1,6 +1,9 @@
 language: go
 sudo: false
 go: "1.x"
+env:
+  global:
+    - GO111MODULE=on
 script:
   - ./bin/run-test-suite.sh
 after_success:
