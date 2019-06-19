@@ -1,0 +1,50 @@
+module github.com/VEVO/kubernetes-updater
+
+require (
+	cloud.google.com/go v0.0.0-20160913182117-3b1ae45394a2
+	github.com/Masterminds/glide v0.0.0-20171214012703-3e13fd16ed5b
+	github.com/Masterminds/semver v1.4.0
+	github.com/Masterminds/vcs v1.12.0
+	github.com/PuerkitoBio/purell v1.1.0
+	github.com/PuerkitoBio/urlesc v0.0.0-20160726150825-5bd2802263f2
+	github.com/aws/aws-sdk-go v0.0.0-20161111020000-5b341290c488
+	github.com/cenkalti/backoff v2.0.0+incompatible
+	github.com/codegangsta/cli v0.0.0-20180106191048-75104e932ac2
+	github.com/coreos/go-oidc v0.0.0-20160818215358-5644a2f50e2d
+	github.com/coreos/pkg v0.0.0-20160620232715-fa29b1d70f0b
+	github.com/davecgh/go-spew v0.0.0-20151105211317-5215b55f46b2
+	github.com/docker/distribution v0.0.0-20160419170423-cd27f179f2c1
+	github.com/emicklei/go-restful v0.0.0-20160814184150-89ef8af493ab
+	github.com/ghodss/yaml v0.0.0-20150909031657-73d445a93680
+	github.com/go-ini/ini v1.32.0
+	github.com/go-openapi/jsonpointer v0.0.0-20160704185906-46af16f9f7b1
+	github.com/go-openapi/jsonreference v0.0.0-20160704190145-13c6e3589ad9
+	github.com/go-openapi/spec v0.0.0-20160808142527-6aced65f8501
+	github.com/go-openapi/swag v0.0.0-20160704191624-1d0bd113de87
+	github.com/gogo/protobuf v0.0.0-20160718161353-e18d7aa8f8c6
+	github.com/golang/glog v0.0.0-20141105023935-44145f04b68c
+	github.com/golang/protobuf v0.0.0-20160608215545-8616e8ee5e20
+	github.com/google/gofuzz v0.0.0-20161122191042-44d81051d367
+	github.com/jmespath/go-jmespath v0.0.0-20160803190731-bd40a432e4c7
+	github.com/jonboulle/clockwork v0.0.0-20141017032234-72f9bd7c4e0c
+	github.com/juju/ratelimit v0.0.0-20151125201925-77ed1c8a0121
+	github.com/kr/fs v0.0.0-20131111012553-2788f0dbd169
+	github.com/kr/pretty v0.0.0-20160823170715-cfb55aafdaf3
+	github.com/kr/text v0.0.0-20160504234017-7cafcd837844
+	github.com/mailru/easyjson v0.0.0-20160728113105-d5b7844b561a
+	github.com/mitchellh/go-homedir v0.0.0-20161203194507-b8bc1bf76747
+	github.com/pborman/uuid v0.0.0-20150603214016-ca53cad383ca
+	github.com/pmezard/go-difflib v0.0.0-20151028094244-d8ed2627bdf0
+	github.com/spf13/pflag v0.0.0-20161024131444-5ccb023bc27d
+	github.com/ugorji/go v0.0.0-20151028022000-f1f1a805ed36
+	golang.org/x/net v0.0.0-20160715184138-e90d6d0afc4c
+	golang.org/x/oauth2 v0.0.0-20160902055913-3c3a985cb79f
+	golang.org/x/text v0.0.0-20160726164857-2910a502d2bf
+	golang.org/x/tools v0.0.0-20180111040409-fbec762f837d
+	google.golang.org/appengine v0.0.0-20160823001527-4f7eeb5305a4
+	gopkg.in/inf.v0 v0.9.0
+	gopkg.in/yaml.v2 v2.0.0-20150924142314-53feefa2559f
+	gopkg.in/zorkian/go-datadog-api.v2 v2.0.0-20171201213526-2ba72e380572
+	k8s.io/apimachinery v0.0.0-20180112112505-c33db96a31b6
+	k8s.io/client-go v0.0.0-20170102151942-24a02a6d7d2c
+)
