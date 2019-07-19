@@ -2,4 +2,4 @@
 
 set -ex
 
-go test -v .
+go test -mod readonly -race -v ./...

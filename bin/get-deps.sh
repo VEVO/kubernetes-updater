@@ -2,5 +2,4 @@
 
 set -ex
 
-go get github.com/Masterminds/glide && \
-  glide install --strip-vendor
+go get -mod readonly ./...

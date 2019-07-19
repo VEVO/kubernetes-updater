@@ -2,52 +2,53 @@ package main
 
 import (
 	"fmt"
-	"k8s.io/client-go/pkg/api/v1"
-	"k8s.io/client-go/pkg/apis/extensions/v1beta1"
-	meta_v1 "k8s.io/client-go/pkg/apis/meta/v1"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type FakeKubernetesClientConfig struct{}
 
-var fakeDeployment = &v1beta1.Deployment{
-	Spec: v1beta1.DeploymentSpec{
+var fakeDeployment = &appsv1.Deployment{
+	Spec: appsv1.DeploymentSpec{
 		Replicas: int32p(1),
-		Template: v1.PodTemplateSpec{
-			ObjectMeta: v1.ObjectMeta{
+		Template: corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{
 				Name:      "fake-service",
 				Namespace: "fake-namespace",
 			},
-			Spec: v1.PodSpec{},
+			Spec: corev1.PodSpec{},
 		},
 	},
 }
 
-var fakeNode = v1.Node{
-	ObjectMeta: v1.ObjectMeta{
+var fakeNode = corev1.Node{
+	ObjectMeta: metav1.ObjectMeta{
 		Name:      "fake-service",
 		Namespace: "fake-namespace",
 	},
-	Spec: v1.NodeSpec{
+	Spec: corev1.NodeSpec{
 		Unschedulable: false,
 	},
 }
 
-func fakeNodeList(listOptions v1.ListOptions) *v1.NodeList {
+func fakeNodeList(listOptions metav1.ListOptions) *corev1.NodeList {
 	labels := make(map[string]string)
 	labels["instance-id"] = "i-fake-instanceid"
 
 	if listOptions.LabelSelector != keysString(labels) {
-		return &v1.NodeList{
-			ListMeta: meta_v1.ListMeta{},
-			Items:    []v1.Node{},
+		return &corev1.NodeList{
+			ListMeta: metav1.ListMeta{},
+			Items:    []corev1.Node{},
 		}
 	}
 
 	fakeNode.Labels = labels
 
-	nodeList := &v1.NodeList{
-		ListMeta: meta_v1.ListMeta{},
-		Items: []v1.Node{
+	nodeList := &corev1.NodeList{
+		ListMeta: metav1.ListMeta{},
+		Items: []corev1.Node{
 			fakeNode,
 		},
 	}
@@ -58,23 +59,23 @@ func newFakeClient() kubernetesClient {
 	return &FakeKubernetesClientConfig{}
 }
 
-func (c FakeKubernetesClientConfig) getDeployment(service string, namespace string) (*v1beta1.Deployment, error) {
+func (c FakeKubernetesClientConfig) getDeployment(service string, namespace string) (*appsv1.Deployment, error) {
 	if service == fakeDeployment.Spec.Template.ObjectMeta.Name && namespace ==
 		fakeDeployment.Spec.Template.ObjectMeta.Namespace {
 		return fakeDeployment, nil
 	}
 	err := fmt.Errorf("deployments.extensions \"%s\" not found", service)
-	return &v1beta1.Deployment{}, err
+	return &appsv1.Deployment{}, err
 }
 
-func (c FakeKubernetesClientConfig) updateDeployment(newDeployment *v1beta1.Deployment) (*v1beta1.Deployment, error) {
+func (c FakeKubernetesClientConfig) updateDeployment(newDeployment *appsv1.Deployment) (*appsv1.Deployment, error) {
 	return newDeployment, nil
 }
 
-func (c FakeKubernetesClientConfig) getNodes(listOptions v1.ListOptions) (*v1.NodeList, error) {
+func (c FakeKubernetesClientConfig) getNodes(listOptions metav1.ListOptions) (*corev1.NodeList, error) {
 	return fakeNodeList(listOptions), nil
 }
 
-func (c FakeKubernetesClientConfig) updateNode(newNode *v1.Node) (*v1.Node, error) {
+func (c FakeKubernetesClientConfig) updateNode(newNode *corev1.Node) (*corev1.Node, error) {
 	return newNode, nil
 }
