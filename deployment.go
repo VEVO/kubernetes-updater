@@ -1,10 +1,12 @@
 package main
 
-import v1beta1 "k8s.io/client-go/pkg/apis/extensions/v1beta1"
+import (
+	appsv1 "k8s.io/api/apps/v1"
+)
 
 type deploymentController interface {
-	getDeployment(kubernetesClient) (*v1beta1.Deployment, error)
-	updateDeployment(kubernetesClient, *v1beta1.Deployment) (*v1beta1.Deployment, error)
+	getDeployment(kubernetesClient) (*appsv1.Deployment, error)
+	updateDeployment(kubernetesClient, *appsv1.Deployment) (*appsv1.Deployment, error)
 }
 
 type kubernetesDeployment struct {
@@ -12,12 +14,12 @@ type kubernetesDeployment struct {
 	namespace string
 }
 
-func (k kubernetesDeployment) getDeployment(client kubernetesClient) (*v1beta1.Deployment, error) {
+func (k kubernetesDeployment) getDeployment(client kubernetesClient) (*appsv1.Deployment, error) {
 	deploymentObject, err := client.getDeployment(k.service, k.namespace)
 	return deploymentObject, err
 }
 
-func (k kubernetesDeployment) updateDeployment(client kubernetesClient, deployment *v1beta1.Deployment) (*v1beta1.Deployment, error) {
+func (k kubernetesDeployment) updateDeployment(client kubernetesClient, deployment *appsv1.Deployment) (*appsv1.Deployment, error) {
 	deploymentObject, err := client.updateDeployment(deployment)
 	return deploymentObject, err
 }

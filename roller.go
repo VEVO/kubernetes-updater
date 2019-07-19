@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/client-go/pkg/api/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	"strconv"
 
@@ -318,7 +318,7 @@ func resumeASGProcesses(awsClient *awsClient, scalingProcesses []*string, compon
 func cordonKubernetesNodes(kubernetesClient kubernetesClient, instanceList []string) error {
 	nodesController := kubernetesNodes{}
 	labels := make(map[string]string)
-	var nodeListToCordon []v1.Node
+	var nodeListToCordon []corev1.Node
 
 	glog.V(4).Infof("Fetching kubernetes nodes for instance IDs: %s\n", instanceList)
 	for _, instanceID := range instanceList {
