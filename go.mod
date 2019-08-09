@@ -27,7 +27,7 @@ require (
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.2.2 // indirect
-	gopkg.in/zorkian/go-datadog-api.v2 v2.21.0
+	gopkg.in/zorkian/go-datadog-api.v2 v2.22.0
 	k8s.io/api v0.0.0-20190222213804-5cb15d344471
 	k8s.io/apimachinery v0.0.0-20190221213512-86fb29eff628
 	k8s.io/client-go v0.0.0-20190521190702-177766529176
