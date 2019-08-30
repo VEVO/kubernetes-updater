@@ -116,6 +116,8 @@ gopkg.in/zorkian/go-datadog-api.v2 v2.21.0 h1:VAn5lpAtvBl16sSUIKeMDrM0HVV7dKFmQT
 gopkg.in/zorkian/go-datadog-api.v2 v2.21.0/go.mod h1:kx0CSMRpzEZfx/nFH62GLU4stZjparh/BRpM89t4XCQ=
 gopkg.in/zorkian/go-datadog-api.v2 v2.22.0 h1:FHAtveqzg03VbZoa9ZQ+dlgO7j5M0cprQVcr/eOP4H0=
 gopkg.in/zorkian/go-datadog-api.v2 v2.22.0/go.mod h1:kx0CSMRpzEZfx/nFH62GLU4stZjparh/BRpM89t4XCQ=
+gopkg.in/zorkian/go-datadog-api.v2 v2.23.0 h1:EB1XcwzwX1h4UsLTQ0Owy8/+eksF0DQT4TFs8yWbJKo=
+gopkg.in/zorkian/go-datadog-api.v2 v2.23.0/go.mod h1:kx0CSMRpzEZfx/nFH62GLU4stZjparh/BRpM89t4XCQ=
 k8s.io/api v0.0.0-20190222213804-5cb15d344471 h1:MzQGt8qWQCR+39kbYRd0uQqsvSidpYqJLFeWiJ9l4OE=
 k8s.io/api v0.0.0-20190222213804-5cb15d344471/go.mod h1:iuAfoD4hCxJ8Onx9kaTIt30j7jUFS00AXQi6QMi99vA=
 k8s.io/apimachinery v0.0.0-20190221213512-86fb29eff628 h1:UYfHH+KEF88OTg+GojQUwFTNxbxwmoktLwutUzR0GPg=
