@@ -35,21 +35,21 @@ func newClient(server string, username string, password string) kubernetesClient
 }
 
 func (c kubernetesClientConfig) getDeployment(service string, namespace string) (*appsv1.Deployment, error) {
-	deployment := c.clientset.Apps().Deployments(namespace)
+	deployment := c.clientset.AppsV1().Deployments(namespace)
 	return deployment.Get(service, metav1.GetOptions{})
 }
 
 func (c kubernetesClientConfig) updateDeployment(newDeployment *appsv1.Deployment) (*appsv1.Deployment, error) {
-	deployment := c.clientset.Apps().Deployments(newDeployment.ObjectMeta.Namespace)
+	deployment := c.clientset.AppsV1().Deployments(newDeployment.ObjectMeta.Namespace)
 	return deployment.Update(newDeployment)
 }
 
 func (c kubernetesClientConfig) getNodes(listOptions metav1.ListOptions) (*corev1.NodeList, error) {
-	nodeList, err := c.clientset.Core().Nodes().List(listOptions)
+	nodeList, err := c.clientset.CoreV1().Nodes().List(listOptions)
 	return nodeList, err
 }
 
 func (c kubernetesClientConfig) updateNode(newNode *corev1.Node) (*corev1.Node, error) {
-	node, err := c.clientset.Core().Nodes().Update(newNode)
+	node, err := c.clientset.CoreV1().Nodes().Update(newNode)
 	return node, err
 }
