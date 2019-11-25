@@ -1,4 +1,6 @@
-[![Build Status](https://travis-ci.org/VEVO/kubernetes-updater.svg?branch=master)](https://travis-ci.org/VEVO/kubernetes-updater)
+[![GoDoc](https://godoc.org/github.com/VEVO/kubernetes-updater?status.svg)](https://godoc.org/github.com/VEVO/kubernetes-updater)
+[![Test Status](https://github.com/VEVO/kubernetes-updater/workflows/tests/badge.svg)](https://github.com/VEVO/kubernetes-updater/actions?query=workflow%3Atests)
+[![Go Report Card](https://goreportcard.com/badge/github.com/VEVO/kubernetes-updater)](https://goreportcard.com/report/github.com/VEVO/kubernetes-updater)
 
 # kubernetes-updater
 Rolling updates of kubernetes clusters
