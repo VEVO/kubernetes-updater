@@ -19,10 +19,10 @@ type kubernetesClientConfig struct {
 	clientset *kubernetes.Clientset
 }
 
-func newClient(server string, username string, password string, token string) kubernetesClient {
+func newClient(server string, token string) kubernetesClient {
 	config := &rest.Config{
 		Host:     server,
-		BearerToken
+		BearerToken: token,
 		QPS:      100.0,
 		Burst:    200,
 	}

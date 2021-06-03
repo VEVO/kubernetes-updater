@@ -1,15 +1,21 @@
 module github.com/VEVO/kubernetes-updater
 
 require (
+	github.com/aktau/github-release v0.10.0 // indirect
 	github.com/aws/aws-sdk-go v1.25.41
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
+	github.com/dustin/go-humanize v1.0.0 // indirect
+	github.com/github-release/github-release v0.10.0 // indirect
 	github.com/gogo/protobuf v1.3.1 // indirect
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
 	github.com/googleapis/gnostic v0.3.1 // indirect
 	github.com/json-iterator/go v1.1.8 // indirect
+	github.com/kevinburke/rest v0.0.0-20210506044642-5611499aa33c // indirect
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/testify v1.4.0 // indirect
+	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80 // indirect
+	github.com/voxelbrain/goptions v0.0.0-20180630082107-58cddc247ea2 // indirect
 	github.com/zorkian/go-datadog-api v2.21.0+incompatible // indirect
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c // indirect
 	golang.org/x/net v0.0.0-20191119073136-fc4aabc6c914 // indirect

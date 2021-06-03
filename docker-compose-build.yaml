@@ -1,5 +1,4 @@
 version: '2'
-
 services:
   godep:
     image: golang:1.12
@@ -7,12 +6,16 @@ services:
       - ./:/go/src/a/${BINARY_NAME}
     command: ./bin/get-deps.sh
     working_dir: /go/src/a/${BINARY_NAME}
+    environment:
+      GO111MODULE: "on"
   test:
     image: golang:1.12
     volumes:
       - ./:/go/src/a/${BINARY_NAME}
     command: ./bin/run-test-suite.sh
     working_dir: /go/src/a/${BINARY_NAME}
+    environment:
+      GO111MODULE: "on"
   binary:
     image: golang:1.12
     volumes:
@@ -21,12 +24,14 @@ services:
     working_dir: /go/src/a/${BINARY_NAME}
     environment:
       CGO_ENABLED: 0
+      GO111MODULE: "on"
   release:
     image: golang:1.12
     command: ./bin/push-to-github.sh
     environment:
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       TAG: ${TAG}
+      GO111MODULE: "on"
     volumes:
       - ./:/go/src/a/${BINARY_NAME}
     working_dir: /go/src/a/${BINARY_NAME}
