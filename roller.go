@@ -33,7 +33,7 @@ var (
 	ansibleVersion           = os.Getenv("ANSIBLE_VERSION")
 	kubernetesServer         = os.Getenv("KUBERNETES_SERVER")
 	kubernetesToken          = os.Getenv("KUBERNETES_TOKEN")
-   	terminationWaitPeriodStr = os.Getenv("TERMINATION_WAIT_PERIOD_SECONDS")
+	terminationWaitPeriodStr = os.Getenv("TERMINATION_WAIT_PERIOD_SECONDS")
 	desiredCountStepStr      = os.Getenv("TERMINATION_BATCH_NODES_SIZE")
 	desiredCountStep         = 5
 	state                    *rollerState
