@@ -21,10 +21,10 @@ type kubernetesClientConfig struct {
 
 func newClient(server string, token string) kubernetesClient {
 	config := &rest.Config{
-		Host:     server,
+		Host:        server,
 		BearerToken: token,
-		QPS:      100.0,
-		Burst:    200,
+		QPS:         100.0,
+		Burst:       200,
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
