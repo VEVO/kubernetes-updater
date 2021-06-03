@@ -32,8 +32,7 @@ var (
 	rollerLogLevel           = os.Getenv("ROLLER_LOG_LEVEL")
 	ansibleVersion           = os.Getenv("ANSIBLE_VERSION")
 	kubernetesServer         = os.Getenv("KUBERNETES_SERVER")
-	kubernetesUsername       = os.Getenv("KUBERNETES_USERNAME")
-	kubernetesPassword       = os.Getenv("KUBERNETES_PASSWORD")
+	kubernetesToken          = os.Getenv("KUBERNETES_TOKEN")
 	terminationWaitPeriodStr = os.Getenv("TERMINATION_WAIT_PERIOD_SECONDS")
 	desiredCountStepStr      = os.Getenv("TERMINATION_BATCH_NODES_SIZE")
 	desiredCountStep         = 5
@@ -168,7 +167,7 @@ func (s *rollerState) Summary() error {
 
 func setReplicas(deployment, namespace string, replicas int32) error {
 	glog.V(4).Infof("Setting replicas to %d for deployment %s", replicas, deployment)
-	client := newClient(kubernetesServer, kubernetesUsername, kubernetesPassword)
+	client := newClient(kubernetesServer, kubernetesToken)
 	deploymentController := kubernetesDeployment{
 		service:   deployment,
 		namespace: namespace,
@@ -488,7 +487,7 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 	// Mark all the old kubernetes nodes as unschedulable. This is necessary because during the following
 	// termination step, we do not want pods to be rescheduled on the old nodes
 	glog.V(4).Infof("Starting kubernetes cordon process for %s", myComponent.name)
-	kubernetesClient := newClient(kubernetesServer, kubernetesUsername, kubernetesPassword)
+	kubernetesClient := newClient(kubernetesServer, kubernetesToken)
 	err = cordonKubernetesNodes(kubernetesClient, instanceList)
 	if err != nil {
 		err = fmt.Errorf("an error occurred attempting to cordon kubernetes nodes %s\n Error: %s", instanceList, err)
@@ -670,10 +669,8 @@ func main() {
 		glog.Fatal("Set the SLACK_WEBHOOK variable to desired webhook")
 	case kubernetesServer == "":
 		glog.Fatal("Set the KUBERNETES_SERVER variable to desired kubernetes server")
-	case kubernetesUsername == "":
-		glog.Fatal("Set the KUBERNETES_USERNAME variable to desired kubernetes username")
-	case kubernetesPassword == "":
-		glog.Fatal("Set the KUBERNETES_PASSWORD variable to desired kubernetes password")
+	case kubernetesToken == "":
+		glog.Fatal("Set the KUBERNETES_TOKEN variable to desired kubernetes token")
 	case apiKey == "":
 		glog.Fatal("Set the DATADOG_API_KEY")
 	case appKey == "":
