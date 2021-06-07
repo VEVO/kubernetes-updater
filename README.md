@@ -2,6 +2,9 @@
 [![Test Status](https://github.com/VEVO/kubernetes-updater/workflows/tests/badge.svg)](https://github.com/VEVO/kubernetes-updater/actions?query=workflow%3Atests)
 [![Go Report Card](https://goreportcard.com/badge/github.com/VEVO/kubernetes-updater)](https://goreportcard.com/report/github.com/VEVO/kubernetes-updater)
 
+# This repository is no longer maintained
+Issue reports and pull requests will not be reviewed.
+
 # kubernetes-updater
 Rolling updates of kubernetes clusters
 
