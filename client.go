@@ -7,6 +7,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"os"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/kubectl/pkg/drain"
+	"github.com/golang/glog"
+	"time"
+	"fmt"
 )
 
 type kubernetesClient interface {
@@ -14,6 +20,7 @@ type kubernetesClient interface {
 	updateDeployment(*appsv1.Deployment) (*appsv1.Deployment, error)
 	getNodes(metav1.ListOptions) (*corev1.NodeList, error)
 	updateNode(*corev1.Node) (*corev1.Node, error)
+	drainNode(*corev1.Node) (error)
 }
 
 type kubernetesClientConfig struct {
@@ -26,6 +33,7 @@ func newClient(server string, token string) kubernetesClient {
 		BearerToken: token,
 		QPS:         100.0,
 		Burst:       200,
+		TLSClientConfig: rest.TLSClientConfig{Insecure:true},
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
@@ -52,4 +60,43 @@ func (c kubernetesClientConfig) getNodes(listOptions metav1.ListOptions) (*corev
 func (c kubernetesClientConfig) updateNode(newNode *corev1.Node) (*corev1.Node, error) {
 	node, err := c.clientset.CoreV1().Nodes().Update(context.TODO(),newNode,metav1.UpdateOptions{})
 	return node, err
+}
+
+func (c kubernetesClientConfig) drainNode(node *corev1.Node) (error) {
+	if c.clientset == nil {
+        return fmt.Errorf("K8sClient not set")
+    }
+    if node == nil {
+        return fmt.Errorf("node not set")
+    }
+    if node.Name == "" {
+        return fmt.Errorf("node name not set")
+    }
+	helper := &drain.Helper{
+		Client:              c.clientset,
+		Force:               true,
+        GracePeriodSeconds:  -1,
+		IgnoreAllDaemonSets: true,
+		DeleteEmptyDirData:  true,
+		Out:                 os.Stdout,
+		ErrOut:              os.Stdout,
+        Timeout:             time.Duration(120) * time.Second,
+	}
+	glog.V(4).Infof("Verifying node is cordoned")
+	err := drain.RunCordonOrUncordon(helper, node, true); 
+	if err != nil {
+        if apierrors.IsNotFound(err) {
+            return fmt.Errorf("RunCordonOrUncordon API not found: %v", err)
+        }
+        return fmt.Errorf("error cordoning node: %v", err)
+    }
+	glog.V(4).Infof("Running drain for node %s\n", node.Name)
+    err = drain.RunNodeDrain(helper, node.Name); 
+	if err != nil {
+        if apierrors.IsNotFound(err) {
+            return fmt.Errorf("RunNodeDrain API not found: %v", err)
+        }
+        return fmt.Errorf("error draining node: %v", err)
+    }
+	return nil
 }

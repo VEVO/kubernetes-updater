@@ -25,3 +25,8 @@ func (k kubernetesNodes) updateNode(client kubernetesClient, node *corev1.Node) 
 	node, err := client.updateNode(node)
 	return node, err
 }
+
+func (k kubernetesNodes) drainNode(client kubernetesClient, node *corev1.Node) (error) {
+	err := client.drainNode(node)
+	return err
+}
