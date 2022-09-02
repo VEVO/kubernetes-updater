@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,20 +36,20 @@ func newClient(server string, token string) kubernetesClient {
 
 func (c kubernetesClientConfig) getDeployment(service string, namespace string) (*appsv1.Deployment, error) {
 	deployment := c.clientset.AppsV1().Deployments(namespace)
-	return deployment.Get(service, metav1.GetOptions{})
+	return deployment.Get(context.TODO(),service, metav1.GetOptions{})
 }
 
 func (c kubernetesClientConfig) updateDeployment(newDeployment *appsv1.Deployment) (*appsv1.Deployment, error) {
 	deployment := c.clientset.AppsV1().Deployments(newDeployment.ObjectMeta.Namespace)
-	return deployment.Update(newDeployment)
+	return deployment.Update(context.TODO(),newDeployment,metav1.UpdateOptions{})
 }
 
 func (c kubernetesClientConfig) getNodes(listOptions metav1.ListOptions) (*corev1.NodeList, error) {
-	nodeList, err := c.clientset.CoreV1().Nodes().List(listOptions)
+	nodeList, err := c.clientset.CoreV1().Nodes().List(context.TODO(),listOptions)
 	return nodeList, err
 }
 
 func (c kubernetesClientConfig) updateNode(newNode *corev1.Node) (*corev1.Node, error) {
-	node, err := c.clientset.CoreV1().Nodes().Update(newNode)
+	node, err := c.clientset.CoreV1().Nodes().Update(context.TODO(),newNode,metav1.UpdateOptions{})
 	return node, err
 }
