@@ -380,7 +380,6 @@ func drainKubernetesNodes(kubernetesClient kubernetesClient, instanceList []stri
 	return nil
 }
 
-
 // Terminates and checks one or more instances at a time, in a "rolling" fashion. Differs from
 // replaceInstancesVerifyAndTerminate() in that it terminates the instances before verifying replacements.
 // Useful for small ASGs or when there is an upper limit to the number of instances you can have in the an ASG.
@@ -532,7 +531,6 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 		err = fmt.Errorf("an error occurred attempting to cordon kubernetes nodes %s\n Error: %s", instanceList, err)
 		glog.V(4).Infof("%s", err)
 	}
-	
 
 	// Suspend the launch process so the ASG doesn't backfill the instances we're about to terminate
 	scalingProcesses = []*string{

@@ -79,6 +79,6 @@ func (c FakeKubernetesClientConfig) getNodes(listOptions metav1.ListOptions) (*c
 func (c FakeKubernetesClientConfig) updateNode(newNode *corev1.Node) (*corev1.Node, error) {
 	return newNode, nil
 }
-func (c FakeKubernetesClientConfig) drainNode(newNode *corev1.Node) (error) {
+func (c FakeKubernetesClientConfig) drainNode(newNode *corev1.Node) error {
 	return nil
 }
