@@ -2,36 +2,31 @@ module github.com/VEVO/kubernetes-updater
 
 require (
 	github.com/aktau/github-release v0.10.0 // indirect
+	github.com/armon/consul-api v0.0.0-20180202201655-eb2c6b5be1b6 // indirect
 	github.com/aws/aws-sdk-go v1.25.41
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/github-release/github-release v0.10.0 // indirect
-	github.com/gogo/protobuf v1.3.1 // indirect
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
-	github.com/googleapis/gnostic v0.3.1 // indirect
-	github.com/json-iterator/go v1.1.8 // indirect
+	github.com/gophercloud/gophercloud v0.0.0-20190126172459-c818fa66e4c8 // indirect
 	github.com/kevinburke/rest v0.0.0-20210506044642-5611499aa33c // indirect
-	github.com/kr/pretty v0.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/testify v1.4.0 // indirect
 	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80 // indirect
+	github.com/ugorji/go v1.1.4 // indirect
 	github.com/voxelbrain/goptions v0.0.0-20180630082107-58cddc247ea2 // indirect
+	github.com/xlab/handysort v0.0.0-20150421192137-fb3537ed64a1 // indirect
+	github.com/xordataexchange/crypt v0.0.3-0.20170626215501-b2862e3d0a77 // indirect
 	github.com/zorkian/go-datadog-api v2.21.0+incompatible // indirect
-	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c // indirect
-	golang.org/x/net v0.0.0-20191119073136-fc4aabc6c914 // indirect
-	golang.org/x/oauth2 v0.0.0-20191122200657-5d9234df094c // indirect
-	golang.org/x/sys v0.0.0-20191120155948-bd437916bb0e // indirect
-	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
+	golang.org/x/sys v0.0.0-20220829200755-d48e67d00261 // indirect
 	google.golang.org/appengine v1.6.5 // indirect
-	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	gopkg.in/yaml.v2 v2.2.7 // indirect
 	gopkg.in/zorkian/go-datadog-api.v2 v2.25.0
-	k8s.io/api v0.0.0-20191114100237-2cd11237263f
-	k8s.io/apimachinery v0.0.0-20191004115701-31ade1b30762
-	k8s.io/client-go v0.0.0-20191114101336-8cba805ad12d
+	k8s.io/api v0.20.15
+	k8s.io/apimachinery v0.20.15
+	k8s.io/client-go v0.20.15
 	k8s.io/klog v1.0.0 // indirect
-	k8s.io/utils v0.0.0-20191114200735-6ca3b61696b6 // indirect
+	k8s.io/kubectl v0.20.15
+	vbom.ml/util v0.0.0-20160121211510-db5cfe13f5cc // indirect
 )
 
 go 1.13

@@ -349,6 +349,37 @@ func cordonKubernetesNodes(kubernetesClient kubernetesClient, instanceList []str
 	return nil
 }
 
+func drainKubernetesNodes(kubernetesClient kubernetesClient, instanceList []string) error {
+	nodesController := kubernetesNodes{}
+	labels := make(map[string]string)
+	var nodeListToDrain []corev1.Node
+
+	glog.V(4).Infof("Fetching kubernetes nodes for instance IDs: %s\n", instanceList)
+	for _, instanceID := range instanceList {
+		labels["instance-id"] = instanceID
+		nodeList, err := nodesController.getNodesByLabel(kubernetesClient, labels)
+		if err != nil {
+			return fmt.Errorf("failed to populate node by label: %s", err)
+		}
+		nodeListToDrain = append(nodeListToDrain, nodeList.Items...)
+	}
+
+	nodesFail := make(map[string]error)
+	for _, node := range nodeListToDrain {
+		glog.V(4).Infof("Draining kubernetes node: %s\n", node.Name)
+		node := &node
+		err := nodesController.drainNode(kubernetesClient, node)
+		if err != nil {
+			nodesFail[node.Name] = err
+		}
+	}
+
+	if len(nodesFail) > 0 {
+		return fmt.Errorf("failed to drain nodes: %s", nodesFail)
+	}
+	return nil
+}
+
 // Terminates and checks one or more instances at a time, in a "rolling" fashion. Differs from
 // replaceInstancesVerifyAndTerminate() in that it terminates the instances before verifying replacements.
 // Useful for small ASGs or when there is an upper limit to the number of instances you can have in the an ASG.
@@ -489,6 +520,13 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 	glog.V(4).Infof("Starting kubernetes cordon process for %s", myComponent.name)
 	kubernetesClient := newClient(kubernetesServer, kubernetesToken)
 	err = cordonKubernetesNodes(kubernetesClient, instanceList)
+	if err != nil {
+		err = fmt.Errorf("an error occurred attempting to cordon kubernetes nodes %s\n Error: %s", instanceList, err)
+		glog.V(4).Infof("%s", err)
+	}
+	// Drain all previous nodes, this moves the workload onto the new nodes first, so we come up before we start killing nodes.
+	glog.V(4).Infof("Starting kubernetes drain process for %s", myComponent.name)
+	err = drainKubernetesNodes(kubernetesClient, instanceList)
 	if err != nil {
 		err = fmt.Errorf("an error occurred attempting to cordon kubernetes nodes %s\n Error: %s", instanceList, err)
 		glog.V(4).Infof("%s", err)

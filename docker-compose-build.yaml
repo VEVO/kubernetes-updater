@@ -1,7 +1,7 @@
 version: '2'
 services:
   godep:
-    image: golang:1.12
+    image: golang:1.19
     volumes:
       - ./:/go/src/a/${BINARY_NAME}
     command: ./bin/get-deps.sh
@@ -9,7 +9,7 @@ services:
     environment:
       GO111MODULE: "on"
   test:
-    image: golang:1.12
+    image: golang:1.19
     volumes:
       - ./:/go/src/a/${BINARY_NAME}
     command: ./bin/run-test-suite.sh
@@ -17,7 +17,7 @@ services:
     environment:
       GO111MODULE: "on"
   binary:
-    image: golang:1.12
+    image: golang:1.19
     volumes:
       - ./:/go/src/a/${BINARY_NAME}
     command: ./bin/build-binary.sh
@@ -26,7 +26,7 @@ services:
       CGO_ENABLED: 0
       GO111MODULE: "on"
   release:
-    image: golang:1.12
+    image: golang:1.19
     command: ./bin/push-to-github.sh
     environment:
       GITHUB_TOKEN: ${GITHUB_TOKEN}
