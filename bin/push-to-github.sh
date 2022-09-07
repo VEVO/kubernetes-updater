@@ -3,7 +3,7 @@
 export PATH=${PATH}:${GOPATH}/bin
 
 if ! type -P github-release >/dev/null 2>&1 ; then
-  go get github.com/aktau/github-release
+  go install github.com/aktau/github-release
 fi
 
 echo "Tag is ${TAG}"
