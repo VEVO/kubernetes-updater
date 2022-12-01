@@ -49,7 +49,7 @@ var (
 	clusterTerminatorServiceName      = "terminator"
 	clusterTerminatorServiceNamespace = "kube-system"
 	provisionAttemptCounter           = make(map[string]int)
-	terminationWaitPeriod             = time.Duration(180 * time.Second)
+	terminationWaitPeriod             = time.Duration(5 * time.Second)
 	apiKey                            = os.Getenv("DATADOG_API_KEY")
 	appKey                            = os.Getenv("DATADOG_APP_KEY")
 )
@@ -531,6 +531,9 @@ func replaceInstancesVerifyAndTerminate(awsClient *awsClient, component string, 
 		err = fmt.Errorf("an error occurred attempting to cordon kubernetes nodes %s\n Error: %s", instanceList, err)
 		glog.V(4).Infof("%s", err)
 	}
+	// Wait for 60 seconds just to let the drain finish and things to calm down
+	glog.V(4).Infof("Pausing 1 minute for the drain to calm down")
+	time.Sleep(60 * time.Second)
 
 	// Suspend the launch process so the ASG doesn't backfill the instances we're about to terminate
 	scalingProcesses = []*string{
